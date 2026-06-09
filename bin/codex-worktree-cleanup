@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: codex cleanup [OPTIONS]
+
+List and remove clean launcher-created sibling worktrees.
+
+Options:
+  -y, --yes    Remove clean candidates. Without this, only list them.
+      --force  Remove dirty candidates too. Requires --yes.
+      --prune  Run git worktree prune after cleanup.
+  -h, --help   Show this help.
+EOF
+}
+
+canonical_dir() {
+  cd "$1"
+  pwd -P
+}
+
+yes=false
+force=false
+prune=false
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -y|--yes)
+      yes=true
+      ;;
+    --force)
+      force=true
+      ;;
+    --prune)
+      prune=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'codex cleanup: unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+if [[ "$force" == true && "$yes" != true ]]; then
+  printf 'codex cleanup: --force requires --yes\n' >&2
+  exit 2
+fi
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  printf 'codex cleanup: run inside a Git repository\n' >&2
+  exit 1
+fi
+
+repo_root="$(canonical_dir "$(git rev-parse --show-toplevel)")"
+primary_worktree="$(git -C "$repo_root" worktree list --porcelain | awk 'NR == 1 && $1 == "worktree" { print substr($0, 10); exit }')"
+primary_worktree="$(canonical_dir "$primary_worktree")"
+repo_name="$(basename "$primary_worktree")"
+parent_dir="$(dirname "$primary_worktree")"
+candidate_prefix="$parent_dir/$repo_name-"
+
+paths=()
+branches=()
+current_path=""
+current_branch=""
+
+flush_worktree() {
+  if [[ -z "$current_path" ]]; then
+    return
+  fi
+
+  if [[ "$current_path" != "$primary_worktree" && "$current_path" == "$candidate_prefix"* ]]; then
+    paths+=("$current_path")
+    branches+=("${current_branch:-detached}")
+  fi
+
+  current_path=""
+  current_branch=""
+}
+
+while IFS= read -r line; do
+  if [[ -z "$line" ]]; then
+    flush_worktree
+    continue
+  fi
+
+  case "$line" in
+    worktree\ *)
+      flush_worktree
+      current_path="${line#worktree }"
+      ;;
+    branch\ refs/heads/*)
+      current_branch="${line#branch refs/heads/}"
+      ;;
+    branch\ *)
+      current_branch="${line#branch }"
+      ;;
+  esac
+done < <(git -C "$primary_worktree" worktree list --porcelain)
+
+flush_worktree
+
+printf 'Primary: %s\n' "$primary_worktree"
+
+if [[ "${#paths[@]}" -eq 0 ]]; then
+  printf 'No launcher-style sibling worktrees found.\n'
+  if [[ "$prune" == true ]]; then
+    git -C "$primary_worktree" worktree prune
+    printf 'Pruned stale Git worktree metadata.\n'
+  fi
+  exit 0
+fi
+
+removed=0
+skipped=0
+
+for index in "${!paths[@]}"; do
+  path="${paths[$index]}"
+  branch="${branches[$index]}"
+
+  if [[ ! -d "$path" ]]; then
+    printf 'missing %s [%s]\n' "$path" "$branch"
+    skipped=$((skipped + 1))
+    continue
+  fi
+
+  status="$(git -C "$path" status --porcelain --untracked-files=all)"
+  if [[ -n "$status" ]]; then
+    state="dirty"
+  else
+    state="clean"
+  fi
+
+  if [[ "$yes" != true ]]; then
+    printf '%s %s [%s]\n' "$state" "$path" "$branch"
+    continue
+  fi
+
+  if [[ "$state" == "dirty" && "$force" != true ]]; then
+    printf 'skipped dirty %s [%s]\n' "$path" "$branch"
+    skipped=$((skipped + 1))
+    continue
+  fi
+
+  remove_args=(worktree remove)
+  if [[ "$force" == true ]]; then
+    remove_args+=(--force)
+  fi
+  remove_args+=("$path")
+
+  git -C "$primary_worktree" "${remove_args[@]}"
+  printf 'removed %s [%s]\n' "$path" "$branch"
+  removed=$((removed + 1))
+done
+
+if [[ "$yes" != true ]]; then
+  printf 'Dry run. Re-run with --yes to remove clean worktrees.\n'
+fi
+
+if [[ "$prune" == true ]]; then
+  git -C "$primary_worktree" worktree prune
+  printf 'Pruned stale Git worktree metadata.\n'
+fi
+
+printf 'Summary: %s removed, %s skipped.\n' "$removed" "$skipped"

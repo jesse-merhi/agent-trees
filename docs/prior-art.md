@@ -2,6 +2,16 @@
 
 This wrapper exists because local CLI worktree flow is still mostly a userland problem.
 
+Git itself already ships the core cleanup commands:
+
+```sh
+git worktree list
+git worktree remove <path>
+git worktree prune
+```
+
+`git worktree prune` cleans stale Git metadata for worktrees whose directories are already gone. It does not decide which real task directories are safe to delete. The launcher cleanup command fills that gap for sibling worktrees it created.
+
 ## What others are doing
 
 Several guides describe the same basic pattern:

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 CODEX_BIN="${CODEX_BIN:-/opt/homebrew/bin/codex}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 value_options=(
   -a --ask-for-approval
@@ -121,6 +122,10 @@ for arg in "$@"; do
 done
 
 first_arg="${1:-}"
+if [[ "$first_arg" == "cleanup" || "$first_arg" == "worktrees" ]]; then
+  exec "$SCRIPT_DIR/codex-worktree-cleanup" "${@:2}"
+fi
+
 case "$first_arg" in
   help|login|logout|mcp|plugin|mcp-server|app|app-server|exec-server|remote-control|completion|update|doctor|features|archive|unarchive|fork|resume|cloud|sandbox|debug|apply)
     exec "$CODEX_BIN" "$@"

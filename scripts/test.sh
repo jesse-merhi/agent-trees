@@ -4,10 +4,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 bash -n "$repo_root/bin/codex-worktree"
+bash -n "$repo_root/bin/codex-worktree-cleanup"
 bash -n "$repo_root/scripts/install.sh"
 bash -n "$repo_root/scripts/uninstall.sh"
 
 tmpdir="$(mktemp -d)"
+tmpdir="$(cd "$tmpdir" && pwd -P)"
 trap 'rm -rf "$tmpdir"' EXIT
 
 make_repo() {
@@ -75,13 +77,41 @@ option_output="$(
 assert_contains "$option_output" "options-find-regressions-only"
 assert_contains "$option_output" "jesse/find-regressions-only"
 
+cleanup_repo="$tmpdir/cleanup"
+make_repo "$cleanup_repo"
+git -C "$cleanup_repo" worktree add -q -b jesse/remove-me "$tmpdir/cleanup-remove-me"
+
+cleanup_output="$(
+  cd "$cleanup_repo"
+  "$repo_root/bin/codex-worktree" cleanup --yes 2>&1
+)"
+
+assert_contains "$cleanup_output" "removed $tmpdir/cleanup-remove-me"
+test ! -e "$tmpdir/cleanup-remove-me"
+test -e "$cleanup_repo/.git"
+
+dirty_repo="$tmpdir/dirty"
+make_repo "$dirty_repo"
+git -C "$dirty_repo" worktree add -q -b jesse/keep-me "$tmpdir/dirty-keep-me"
+printf 'dirty\n' > "$tmpdir/dirty-keep-me/notes.txt"
+
+dirty_output="$(
+  cd "$dirty_repo"
+  "$repo_root/bin/codex-worktree" cleanup --yes 2>&1
+)"
+
+assert_contains "$dirty_output" "skipped dirty $tmpdir/dirty-keep-me"
+test -e "$tmpdir/dirty-keep-me/.git"
+
 install_home="$tmpdir/home"
 mkdir -p "$install_home"
 HOME="$install_home" "$repo_root/scripts/install.sh" >/dev/null
 test -x "$install_home/.local/bin/codex-worktree"
+test -x "$install_home/.local/bin/codex-worktree-cleanup"
 grep -Fq "# >>> worktree-launcher >>>" "$install_home/.zshrc"
 HOME="$install_home" "$repo_root/scripts/uninstall.sh" >/dev/null
 test ! -e "$install_home/.local/bin/codex-worktree"
+test ! -e "$install_home/.local/bin/codex-worktree-cleanup"
 ! grep -Fq "# >>> worktree-launcher >>>" "$install_home/.zshrc"
 
 printf 'All tests passed.\n'

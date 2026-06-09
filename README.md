@@ -53,6 +53,7 @@ The installer copies:
 
 ```text
 bin/codex-worktree -> ~/.local/bin/codex-worktree
+bin/codex-worktree-cleanup -> ~/.local/bin/codex-worktree-cleanup
 ```
 
 and adds this shell alias if one is not already present:
@@ -97,6 +98,54 @@ you are already inside a linked worktree
 no prompt was provided in a non-interactive shell
 the interactive prompt is blank
 ```
+
+## Cleanup
+
+Git has native worktree cleanup commands:
+
+```sh
+git worktree list
+git worktree remove <path>
+git worktree prune
+```
+
+This wrapper adds a safer launcher-specific flow:
+
+```sh
+codex cleanup
+```
+
+That lists sibling worktrees matching the launcher naming pattern:
+
+```text
+../repo-task-name
+```
+
+It does not remove anything unless you ask:
+
+```sh
+codex cleanup --yes
+```
+
+By default, dirty worktrees are skipped:
+
+```text
+skipped dirty /path/to/repo-task [jesse/task]
+```
+
+To include Git's stale metadata prune:
+
+```sh
+codex cleanup --yes --prune
+```
+
+There is also an explicit force path:
+
+```sh
+codex cleanup --yes --force
+```
+
+Use that only after checking the worktree. It passes `--force` to `git worktree remove`.
 
 ## Settings
 
