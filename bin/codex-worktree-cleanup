@@ -5,7 +5,6 @@ import argparse
 import os
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,32 +24,12 @@ class Candidate:
     dirty: bool | None
 
 
-@dataclass(frozen=True)
-class RegistryEntry:
-    primary: Path
-    worktree: Path
-    branch: str
-    recorded_at: str
-
-
 @dataclass
 class Totals:
     clean: int = 0
     dirty: int = 0
     removed: int = 0
     skipped: int = 0
-
-
-def registry_path() -> Path:
-    explicit = os.environ.get("WORKTREE_LAUNCHER_REGISTRY")
-    if explicit:
-        return canonical(explicit)
-
-    xdg_state = os.environ.get("XDG_STATE_HOME")
-    if xdg_state:
-        return canonical(Path(xdg_state) / "worktree-launcher" / "worktrees.tsv")
-
-    return canonical(Path.home() / ".local/state/worktree-launcher/worktrees.tsv")
 
 
 def run_git(cwd: Path, args: list[str], *, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -72,87 +51,6 @@ def require_git(cwd: Path, args: list[str]) -> str:
 
 def canonical(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
-
-
-def path_is_under(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
-
-
-def read_registry_entries() -> list[RegistryEntry]:
-    registry = registry_path()
-    if not registry.exists():
-        return []
-
-    entries: list[RegistryEntry] = []
-    with registry.open("r", encoding="utf-8") as file:
-        for line in file:
-            fields = line.rstrip("\n").split("\t")
-            if len(fields) < 3:
-                continue
-
-            entries.append(
-                RegistryEntry(
-                    primary=canonical(fields[0]),
-                    worktree=canonical(fields[1]),
-                    branch=fields[2] or "detached",
-                    recorded_at=fields[3] if len(fields) > 3 else "0",
-                )
-            )
-
-    return entries
-
-
-def write_registry_entries(entries: list[RegistryEntry]) -> None:
-    registry = registry_path()
-    registry.parent.mkdir(parents=True, exist_ok=True)
-    temp_registry = registry.with_suffix(f"{registry.suffix}.tmp")
-
-    with temp_registry.open("w", encoding="utf-8") as file:
-        for entry in entries:
-            file.write(f"{entry.primary}\t{entry.worktree}\t{entry.branch}\t{entry.recorded_at}\n")
-
-    temp_registry.replace(registry)
-
-
-def compact_registry(new_entries: list[RegistryEntry]) -> None:
-    by_key: dict[tuple[Path, Path], RegistryEntry] = {}
-
-    for entry in read_registry_entries():
-        if entry.worktree.exists():
-            by_key[(entry.primary, entry.worktree)] = entry
-
-    for entry in new_entries:
-        by_key[(entry.primary, entry.worktree)] = entry
-
-    write_registry_entries(
-        [
-            by_key[key]
-            for key in sorted(by_key, key=lambda item: (str(item[0]), str(item[1])))
-        ]
-    )
-
-
-def registry_candidates(scan_roots: list[Path]) -> list[Candidate]:
-    candidates: list[Candidate] = []
-    seen: set[tuple[Path, Path]] = set()
-
-    for entry in read_registry_entries():
-        if not any(path_is_under(entry.primary, root) or path_is_under(entry.worktree, root) for root in scan_roots):
-            continue
-
-        key = (entry.primary, entry.worktree)
-        if key in seen:
-            continue
-        seen.add(key)
-
-        if entry.worktree.exists():
-            candidates.append(Candidate(entry.primary, Worktree(entry.worktree, entry.branch), dirty=None))
-
-    return candidates
 
 
 def parse_worktree_list(output: str) -> list[Worktree]:
@@ -381,11 +279,9 @@ def candidate_from_marker(marker_file: Path) -> Candidate | None:
     )
 
 
-def refresh_registry(scan_roots: list[Path], max_depth: int | None) -> list[Candidate]:
+def scan_candidates(scan_roots: list[Path], max_depth: int | None) -> list[Candidate]:
     candidates: list[Candidate] = []
     seen: set[tuple[Path, Path]] = set()
-    registry_entries: list[RegistryEntry] = []
-    recorded_at = str(int(time.time()))
 
     for scan_root in scan_roots:
         for marker_file in discover_marker_files(scan_root, max_depth):
@@ -398,17 +294,7 @@ def refresh_registry(scan_roots: list[Path], max_depth: int | None) -> list[Cand
                 continue
             seen.add(key)
 
-            registry_entries.append(
-                RegistryEntry(
-                    candidate.primary,
-                    candidate.worktree.path,
-                    candidate.worktree.branch,
-                    recorded_at,
-                )
-            )
             candidates.append(candidate)
-
-    compact_registry(registry_entries)
 
     return candidates
 
@@ -605,7 +491,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--force", action="store_true", help="remove dirty candidates too; requires --yes")
     parser.add_argument("--prune", action="store_true", help="run git worktree prune after cleanup")
     parser.add_argument("--scan", action="append", default=[], metavar="DIR", help="scan for Git repos under DIR")
-    parser.add_argument("--refresh", action="store_true", help="import existing worktrees into the local registry")
     parser.add_argument("--max-depth", type=int, default=4, metavar="N", help="limit --scan recursion depth")
     parser.add_argument("--unbounded", action="store_true", help="disable the scan depth limit")
     return parser.parse_args(argv)
@@ -635,18 +520,7 @@ def main(argv: list[str]) -> int:
                 else:
                     print(f"Scanning {scan_root} (max depth {max_depth})")
 
-            if args.refresh:
-                candidates = refresh_registry(scan_roots, max_depth)
-            else:
-                candidates = registry_candidates(scan_roots)
-
-            if not candidates:
-                for scan_root in scan_roots:
-                    print(f"No Git repositories found under {scan_root}.")
-                if not args.refresh:
-                    print(f"Registry: {registry_path()}")
-                    print("Run with --refresh to import existing worktrees.")
-                return 0
+            candidates = scan_candidates(scan_roots, max_depth)
 
             return cleanup_candidates(candidates, args)
 

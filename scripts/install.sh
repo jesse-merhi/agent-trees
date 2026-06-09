@@ -6,10 +6,16 @@ bin_dir="${WORKTREE_LAUNCHER_BIN_DIR:-$HOME/.local/bin}"
 shell_rc="${WORKTREE_LAUNCHER_SHELL_RC:-$HOME/.zshrc}"
 target="$bin_dir/codex-worktree"
 cleanup_target="$bin_dir/codex-worktree-cleanup"
+obsolete_state_file="$HOME/.local/state/worktree-launcher/worktrees.tsv"
 
 mkdir -p "$bin_dir"
 install -m 0755 "$repo_root/bin/codex-worktree" "$target"
 install -m 0755 "$repo_root/bin/codex-worktree-cleanup" "$cleanup_target"
+
+if [[ -f "$obsolete_state_file" ]]; then
+  rm -f "$obsolete_state_file"
+  printf 'Removed obsolete %s\n' "$obsolete_state_file"
+fi
 
 if [[ ! -e "$shell_rc" ]]; then
   touch "$shell_rc"

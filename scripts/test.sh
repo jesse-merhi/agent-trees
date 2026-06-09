@@ -10,7 +10,6 @@ bash -n "$repo_root/scripts/uninstall.sh"
 
 tmpdir="$(mktemp -d)"
 tmpdir="$(cd "$tmpdir" && pwd -P)"
-export WORKTREE_LAUNCHER_REGISTRY="$tmpdir/worktrees.tsv"
 trap 'rm -rf "$tmpdir"' EXIT
 
 make_repo() {
@@ -48,9 +47,14 @@ assert_contains "$output" "jesse/fix-login-redirect"
 assert_contains "$output" "-C "
 test -e "$tmpdir/demo-fix-login-redirect/.git"
 
-registry_scan_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$tmpdir" 2>&1)"
-assert_contains "$registry_scan_output" "demo (1)"
-assert_contains "$registry_scan_output" "demo-fix-login-redirect"
+scan_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$tmpdir" 2>&1)"
+assert_contains "$scan_output" "demo (1)"
+assert_contains "$scan_output" "demo-fix-login-redirect"
+
+if find "$tmpdir" -type f -name worktrees.tsv | grep -q .; then
+  printf 'Cleanup should not create a worktree registry file.\n' >&2
+  exit 1
+fi
 
 blank_repo="$tmpdir/blank"
 make_repo "$blank_repo"
@@ -122,7 +126,7 @@ make_repo "$scan_repo_b"
 git -C "$scan_repo_a" worktree add -q -b jesse/remove-alpha "$scan_root/group-a/alpha-remove-alpha"
 git -C "$scan_repo_b" worktree add -q -b jesse/remove-beta "$scan_root/group-b/beta-remove-beta"
 
-scan_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$scan_root" --refresh --yes 2>&1)"
+scan_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$scan_root" --yes 2>&1)"
 
 assert_contains "$scan_output" "Scanning $scan_root"
 assert_contains "$scan_output" "max depth 4"
@@ -137,10 +141,10 @@ mkdir -p "$depth_root/a/b/c/d"
 depth_repo="$depth_root/a/b/c/d/deep"
 make_repo "$depth_repo"
 
-depth_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$depth_root" --refresh --max-depth 3 2>&1)"
+depth_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$depth_root" --max-depth 3 2>&1)"
 
 assert_contains "$depth_output" "Scanning $depth_root (max depth 3)"
-assert_contains "$depth_output" "No Git repositories found under $depth_root"
+assert_contains "$depth_output" "No launcher-style sibling worktrees found."
 
 marker_root="$tmpdir/marker-root"
 mkdir -p "$marker_root/projects"
@@ -148,27 +152,23 @@ marker_repo="$marker_root/projects/gamma"
 make_repo "$marker_repo"
 git -C "$marker_repo" worktree add -q -b jesse/marker "$marker_root/projects/gamma-marker"
 
-marker_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$marker_root" --refresh 2>&1)"
+marker_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$marker_root" 2>&1)"
 
 assert_contains "$marker_output" "gamma (1)"
 assert_contains "$marker_output" "projects/gamma-marker"
 
-linked_scan_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$marker_root/projects/gamma-marker" --refresh 2>&1)"
+linked_scan_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$marker_root/projects/gamma-marker" 2>&1)"
 assert_contains "$linked_scan_output" "gamma (1)"
 assert_contains "$linked_scan_output" "[jesse/marker]"
 
-"$repo_root/bin/codex-worktree" cleanup --scan "$marker_root" --refresh >/dev/null
-gamma_marker_count="$(grep -F -c "$marker_root/projects/gamma-marker" "$WORKTREE_LAUNCHER_REGISTRY")"
-if [[ "$gamma_marker_count" != "1" ]]; then
-  printf 'Expected registry refresh to keep one gamma-marker row, found %s.\n' "$gamma_marker_count" >&2
-  exit 1
-fi
-
 install_home="$tmpdir/home"
 mkdir -p "$install_home"
+mkdir -p "$install_home/.local/state/worktree-launcher"
+printf 'old-cache\n' > "$install_home/.local/state/worktree-launcher/worktrees.tsv"
 HOME="$install_home" "$repo_root/scripts/install.sh" >/dev/null
 test -x "$install_home/.local/bin/codex-worktree"
 test -x "$install_home/.local/bin/codex-worktree-cleanup"
+test ! -e "$install_home/.local/state/worktree-launcher/worktrees.tsv"
 grep -Fq "# >>> worktree-launcher >>>" "$install_home/.zshrc"
 HOME="$install_home" "$repo_root/scripts/uninstall.sh" >/dev/null
 test ! -e "$install_home/.local/bin/codex-worktree"

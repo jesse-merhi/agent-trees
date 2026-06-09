@@ -113,23 +113,6 @@ default_base_branch() {
   printf '%s\n' "${current_branch:-main}"
 }
 
-registry_path() {
-  if [[ -n "${WORKTREE_LAUNCHER_REGISTRY:-}" ]]; then
-    printf '%s\n' "$WORKTREE_LAUNCHER_REGISTRY"
-  elif [[ -n "${XDG_STATE_HOME:-}" ]]; then
-    printf '%s\n' "$XDG_STATE_HOME/worktree-launcher/worktrees.tsv"
-  else
-    printf '%s\n' "$HOME/.local/state/worktree-launcher/worktrees.tsv"
-  fi
-}
-
-record_worktree() {
-  local registry
-  registry="$(registry_path)"
-  mkdir -p "$(dirname "$registry")"
-  printf '%s\t%s\t%s\t%s\n' "$repo_root" "$worktree_dir" "$branch_name" "$(date +%s)" >> "$registry"
-}
-
 first_arg="${1:-}"
 if [[ "$first_arg" == "cleanup" || "$first_arg" == "worktrees" ]]; then
   exec "$SCRIPT_DIR/codex-worktree-cleanup" "${@:2}"
@@ -227,6 +210,5 @@ fi
 
 printf 'codex-worktree: %s\n' "$worktree_dir" >&2
 printf 'codex-worktree: %s\n' "$branch_name" >&2
-record_worktree
 
 exec "$CODEX_BIN" -C "$worktree_dir" "$@"
