@@ -102,25 +102,49 @@ the interactive prompt is blank
 
 ## Naming
 
-The wrapper can ask Codex for a short slug before creating the worktree:
+By default, the wrapper uses fast local deterministic naming.
+
+For smarter names, the wrapper can ask local Ollama for a short slug before creating the worktree:
+
+```sh
+CODEX_WORKTREE_NAMER=ollama codex "Fix login redirect"
+```
+
+The wrapper calls Ollama's local HTTP API with `smollm2:360m`, validates the returned slug, and falls back to local deterministic naming if Ollama is unavailable, slow, or returns invalid output.
+
+Ollama naming is opt-in because warm calls are fast, but cold model starts can add several seconds.
+
+The local fallback lowercases text, removes filler words like `please`, `you`, `the`, and `when`, keeps the first few meaningful words, and caps the result:
+
+```text
+Can you please fix the broken login redirect when users sign in from Google?
+-> fix-broken-login-redirect
+```
+
+Use local fallback naming only:
+
+```sh
+CODEX_WORKTREE_NAMER=local codex "Fix login redirect"
+```
+
+Use Ollama naming:
+
+```sh
+CODEX_WORKTREE_NAMER=ollama codex "Fix login redirect"
+```
+
+Use Codex naming:
 
 ```sh
 CODEX_WORKTREE_NAMER=codex codex "Fix login redirect"
 ```
 
-That runs:
+Codex naming is opt-in because starting a second Codex agent just to name a worktree is noticeably slower.
 
-```sh
-/opt/homebrew/bin/codex exec --ephemeral --skip-git-repo-check --ignore-rules -m gpt-5.1-codex ...
-```
-
-The prompt asks for only a lowercase kebab-case slug, then the wrapper validates and sanitizes the result. If Codex is unavailable, times out, or returns an invalid slug, the wrapper falls back to local naming.
-
-Codex naming is opt-in because starting a second Codex agent just to name a worktree is noticeably slower. By default, the wrapper uses a local deterministic fallback. It lowercases text, removes filler words like `please`, `you`, `the`, and `when`, keeps the first few meaningful words, and caps the result:
+The benchmark from this machine is in:
 
 ```text
-Can you please fix the broken login redirect when users sign in from Google?
--> fix-broken-login-redirect
+docs/slug-namer-benchmark.md
 ```
 
 ## Settings
@@ -137,10 +161,10 @@ Override the generated slug:
 CODEX_WORKTREE_SLUG=login-redirect codex "Fix login redirect"
 ```
 
-Use Codex naming:
+Override the Ollama model or timeout:
 
 ```sh
-CODEX_WORKTREE_NAMER=codex codex "Fix login redirect"
+CODEX_WORKTREE_OLLAMA_MODEL=smollm2:360m CODEX_WORKTREE_OLLAMA_TIMEOUT=4 codex "Fix login redirect"
 ```
 
 Override the Codex naming model or timeout:

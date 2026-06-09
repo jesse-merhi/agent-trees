@@ -225,12 +225,98 @@ print(slug)
 PY
 }
 
+slug_from_ollama() {
+  local value="$1"
+  local model="${CODEX_WORKTREE_OLLAMA_MODEL:-smollm2:360m}"
+  local timeout_seconds="${CODEX_WORKTREE_OLLAMA_TIMEOUT:-4}"
+  local url="${CODEX_WORKTREE_OLLAMA_URL:-http://127.0.0.1:11434/api/generate}"
+
+  command -v python3 >/dev/null 2>&1 || return 1
+
+  CODEX_NAMER_PROMPT="$value" python3 - "$model" "$timeout_seconds" "$url" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+model = sys.argv[1]
+try:
+    timeout_seconds = max(1, int(sys.argv[2]))
+except ValueError:
+    timeout_seconds = 4
+url = sys.argv[3]
+
+task = os.environ.get("CODEX_NAMER_PROMPT", "")
+if not task.strip():
+    raise SystemExit(1)
+
+prompt = f"""Create a git branch/worktree slug for this task.
+
+Rules:
+- Return only the slug.
+- Use lowercase kebab-case.
+- Use 2 to 5 meaningful words.
+- Max 48 characters.
+- No username, repo name, ticket prefix, quotes, or explanation.
+
+Task:
+{task}
+"""
+
+payload = json.dumps(
+    {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "keep_alive": "10m",
+        "options": {
+            "temperature": 0,
+            "top_k": 1,
+            "top_p": 0.1,
+            "num_predict": 24,
+        },
+    }
+).encode("utf-8")
+
+request = urllib.request.Request(
+    url,
+    data=payload,
+    headers={"content-type": "application/json"},
+    method="POST",
+)
+
+try:
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        body = response.read().decode("utf-8")
+except (OSError, urllib.error.URLError, TimeoutError):
+    raise SystemExit(1)
+
+try:
+    raw_slug = str(json.loads(body).get("response", "")).strip().splitlines()[0]
+except (json.JSONDecodeError, IndexError):
+    raise SystemExit(1)
+
+slug = re.sub(r"[^a-z0-9]+", "-", raw_slug.lower()).strip("-")[:48].strip("-")
+if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,47}", slug):
+    raise SystemExit(1)
+
+print(slug)
+PY
+}
+
 name_slug() {
   local value="$1"
   local namer="${CODEX_WORKTREE_NAMER:-local}"
   local slug=""
 
   case "$namer" in
+    ollama)
+      slug="$(slug_from_ollama "$value" 2>/dev/null || true)"
+      ;;
     codex)
       slug="$(slug_from_codex "$value" 2>/dev/null || true)"
       ;;

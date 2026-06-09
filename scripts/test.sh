@@ -48,6 +48,57 @@ test -e "$tmpdir/demo-fix-login-redirect/.git"
 
 noisy_repo="$tmpdir/noisy"
 make_repo "$noisy_repo"
+fake_ollama="$tmpdir/fake-ollama.py"
+fake_ollama_port="$tmpdir/fake-ollama-port"
+cat > "$fake_ollama" <<'PY'
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+import sys
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("content-length", "0"))
+        body = self.rfile.read(length)
+        request = json.loads(body)
+        if request["model"] != "smollm2:360m":
+            self.send_response(400)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"response": "`repair_google_signin_redirect`"}).encode())
+
+    def log_message(self, format, *args):
+        pass
+
+server = HTTPServer(("127.0.0.1", 0), Handler)
+with open(sys.argv[1], "w", encoding="utf-8") as port_file:
+    port_file.write(str(server.server_port))
+server.handle_request()
+PY
+python3 "$fake_ollama" "$fake_ollama_port" &
+fake_ollama_pid=$!
+
+for _ in $(seq 1 50); do
+  [[ -s "$fake_ollama_port" ]] && break
+  sleep 0.1
+done
+
+fake_ollama_url="http://127.0.0.1:$(cat "$fake_ollama_port")/api/generate"
+
+ollama_output="$(
+  cd "$noisy_repo"
+  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=ollama CODEX_WORKTREE_OLLAMA_URL="$fake_ollama_url" "$repo_root/bin/codex-worktree" 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
+)"
+wait "$fake_ollama_pid"
+
+assert_contains "$ollama_output" "noisy-repair-google-signin-redirect"
+assert_contains "$ollama_output" "jesse/repair-google-signin-redirect"
+test -e "$tmpdir/noisy-repair-google-signin-redirect/.git"
+
+codex_repo="$tmpdir/codex"
+make_repo "$codex_repo"
 fake_codex="$tmpdir/fake-codex"
 cat > "$fake_codex" <<'EOF'
 #!/usr/bin/env bash
@@ -72,14 +123,14 @@ fi
 EOF
 chmod +x "$fake_codex"
 
-noisy_output="$(
-  cd "$noisy_repo"
+codex_output="$(
+  cd "$codex_repo"
   CODEX_BIN="$fake_codex" CODEX_WORKTREE_NAMER=codex "$repo_root/bin/codex-worktree" 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
 )"
 
-assert_contains "$noisy_output" "noisy-repair-google-signin-redirect"
-assert_contains "$noisy_output" "jesse/repair-google-signin-redirect"
-test -e "$tmpdir/noisy-repair-google-signin-redirect/.git"
+assert_contains "$codex_output" "codex-repair-google-signin-redirect"
+assert_contains "$codex_output" "jesse/repair-google-signin-redirect"
+test -e "$tmpdir/codex-repair-google-signin-redirect/.git"
 
 override_repo="$tmpdir/override"
 make_repo "$override_repo"
