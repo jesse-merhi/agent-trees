@@ -33,6 +33,36 @@ assert_contains() {
   fi
 }
 
+assert_rejects_namer() {
+  local namer="$1"
+  local repo="$tmpdir/reject-$namer"
+  local output
+  local status
+
+  make_repo "$repo"
+
+  set +e
+  output="$(
+    cd "$repo"
+    CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER="$namer" "$repo_root/bin/codex-worktree" 'Fix Login Redirect' 2>&1
+  )"
+  status=$?
+  set -e
+
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Expected CODEX_WORKTREE_NAMER=%s to fail.\n' "$namer" >&2
+    printf 'Actual output:\n%s\n' "$output" >&2
+    exit 1
+  fi
+
+  assert_contains "$output" "unknown CODEX_WORKTREE_NAMER=$namer"
+
+  if find "$tmpdir" -maxdepth 1 -type d -name "reject-$namer-*" | grep -q .; then
+    printf 'Rejected namer %s created a worktree unexpectedly.\n' "$namer" >&2
+    exit 1
+  fi
+}
+
 repo="$tmpdir/demo"
 make_repo "$repo"
 
@@ -46,56 +76,8 @@ assert_contains "$output" "jesse/fix-login-redirect"
 assert_contains "$output" "-C "
 test -e "$tmpdir/demo-fix-login-redirect/.git"
 
-noisy_repo="$tmpdir/noisy"
-make_repo "$noisy_repo"
-fake_ollama="$tmpdir/fake-ollama.py"
-fake_ollama_port="$tmpdir/fake-ollama-port"
-cat > "$fake_ollama" <<'PY'
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import json
-import sys
-
-class Handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        length = int(self.headers.get("content-length", "0"))
-        body = self.rfile.read(length)
-        request = json.loads(body)
-        if request["model"] != "smollm2:360m":
-            self.send_response(400)
-            self.end_headers()
-            return
-        self.send_response(200)
-        self.send_header("content-type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"response": "`repair_google_signin_redirect`"}).encode())
-
-    def log_message(self, format, *args):
-        pass
-
-server = HTTPServer(("127.0.0.1", 0), Handler)
-with open(sys.argv[1], "w", encoding="utf-8") as port_file:
-    port_file.write(str(server.server_port))
-server.handle_request()
-PY
-python3 "$fake_ollama" "$fake_ollama_port" &
-fake_ollama_pid=$!
-
-for _ in $(seq 1 50); do
-  [[ -s "$fake_ollama_port" ]] && break
-  sleep 0.1
-done
-
-fake_ollama_url="http://127.0.0.1:$(cat "$fake_ollama_port")/api/generate"
-
-ollama_output="$(
-  cd "$noisy_repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=ollama CODEX_WORKTREE_OLLAMA_URL="$fake_ollama_url" "$repo_root/bin/codex-worktree" 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
-)"
-wait "$fake_ollama_pid"
-
-assert_contains "$ollama_output" "noisy-repair-google-signin-redirect"
-assert_contains "$ollama_output" "jesse/repair-google-signin-redirect"
-test -e "$tmpdir/noisy-repair-google-signin-redirect/.git"
+assert_rejects_namer ollama
+assert_rejects_namer llama
 
 codex_repo="$tmpdir/codex"
 make_repo "$codex_repo"
@@ -131,57 +113,6 @@ codex_output="$(
 assert_contains "$codex_output" "codex-repair-google-signin-redirect"
 assert_contains "$codex_output" "jesse/repair-google-signin-redirect"
 test -e "$tmpdir/codex-repair-google-signin-redirect/.git"
-
-llama_repo="$tmpdir/llama"
-make_repo "$llama_repo"
-fake_llama_model="$tmpdir/fake-qwen.gguf"
-fake_llama="$tmpdir/fake-llama-cli"
-fake_ollama_cmd="$tmpdir/ollama"
-printf 'fake model\n' > "$fake_llama_model"
-cat > "$fake_ollama_cmd" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ "\$*" == "show --modelfile fake:qwen" ]]; then
-  printf 'FROM %s\n' "$fake_llama_model"
-else
-  exit 1
-fi
-EOF
-chmod +x "$fake_ollama_cmd"
-cat > "$fake_llama" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-printf 'Loading model...\n'
-printf '> Create a git branch/worktree slug for this task.\n'
-printf 'Return only the slug.\n'
-printf '%s\n' "${FAKE_LLAMA_OUTPUT:-repair-google-signin-redirect}"
-printf '[ Prompt: 1.0 t/s | Generation: 1.0 t/s ]\n'
-printf 'Exiting...\n'
-EOF
-chmod +x "$fake_llama"
-
-llama_output="$(
-  cd "$llama_repo"
-  PATH="$tmpdir:$PATH" CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=llama CODEX_WORKTREE_LLAMA_BIN="$fake_llama" CODEX_WORKTREE_LLAMA_MODEL=fake:qwen "$repo_root/bin/codex-worktree" 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
-)"
-
-assert_contains "$llama_output" "llama-repair-google-signin-redirect"
-assert_contains "$llama_output" "jesse/repair-google-signin-redirect"
-test -e "$tmpdir/llama-repair-google-signin-redirect/.git"
-
-llama_fallback_repo="$tmpdir/llama-fallback"
-make_repo "$llama_fallback_repo"
-
-llama_fallback_output="$(
-  cd "$llama_fallback_repo"
-  PATH="$tmpdir:$PATH" CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=llama CODEX_WORKTREE_LLAMA_BIN="$fake_llama" CODEX_WORKTREE_LLAMA_MODEL=fake:qwen FAKE_LLAMA_OUTPUT=git-keep "$repo_root/bin/codex-worktree" 'ok remove all the worktree cleanup shit and make current worktree names less scuffed' 2>&1
-)"
-
-assert_contains "$llama_fallback_output" "llama-fallback-remove-all-worktree-cleanup"
-assert_contains "$llama_fallback_output" "jesse/remove-all-worktree-cleanup"
-test -e "$tmpdir/llama-fallback-remove-all-worktree-cleanup/.git"
 
 override_repo="$tmpdir/override"
 make_repo "$override_repo"
