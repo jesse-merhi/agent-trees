@@ -134,7 +134,7 @@ slug_from_prompt() {
 
 slug_from_codex() {
   local value="$1"
-  local model="${CODEX_WORKTREE_NAMER_MODEL:-gpt-5-nano}"
+  local model="${CODEX_WORKTREE_NAMER_MODEL:-gpt-5.1-codex}"
   local timeout_seconds="${CODEX_WORKTREE_NAMER_TIMEOUT:-8}"
 
   command -v python3 >/dev/null 2>&1 || return 1
@@ -182,14 +182,17 @@ with tempfile.TemporaryDirectory() as tmpdir:
         "exec",
         "--ephemeral",
         "--skip-git-repo-check",
-        "--ignore-user-config",
         "--ignore-rules",
+        "--disable",
+        "hooks",
         "--color",
         "never",
+        "-c",
+        'model_reasoning_effort="none"',
         "-s",
         "read-only",
-        "-a",
-        "never",
+        "-C",
+        tmpdir,
         "-m",
         model,
         "-o",
@@ -224,7 +227,7 @@ PY
 
 name_slug() {
   local value="$1"
-  local namer="${CODEX_WORKTREE_NAMER:-codex}"
+  local namer="${CODEX_WORKTREE_NAMER:-local}"
   local slug=""
 
   case "$namer" in

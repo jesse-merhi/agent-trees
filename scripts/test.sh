@@ -74,7 +74,7 @@ chmod +x "$fake_codex"
 
 noisy_output="$(
   cd "$noisy_repo"
-  CODEX_BIN="$fake_codex" "$repo_root/bin/codex-worktree" 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
+  CODEX_BIN="$fake_codex" CODEX_WORKTREE_NAMER=codex "$repo_root/bin/codex-worktree" 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
 )"
 
 assert_contains "$noisy_output" "noisy-repair-google-signin-redirect"
