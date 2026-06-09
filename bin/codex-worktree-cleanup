@@ -32,6 +32,18 @@ class Totals:
     skipped: int = 0
 
 
+def registry_path() -> Path:
+    explicit = os.environ.get("WORKTREE_LAUNCHER_REGISTRY")
+    if explicit:
+        return canonical(explicit)
+
+    xdg_state = os.environ.get("XDG_STATE_HOME")
+    if xdg_state:
+        return canonical(Path(xdg_state) / "worktree-launcher" / "worktrees.tsv")
+
+    return canonical(Path.home() / ".local/state/worktree-launcher/worktrees.tsv")
+
+
 def run_git(cwd: Path, args: list[str], *, check: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(cwd), *args],
@@ -51,6 +63,53 @@ def require_git(cwd: Path, args: list[str]) -> str:
 
 def canonical(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
+
+
+def path_is_under(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def append_registry_entry(primary: Path, worktree: Worktree) -> None:
+    registry = registry_path()
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    with registry.open("a", encoding="utf-8") as file:
+        file.write(f"{primary}\t{worktree.path}\t{worktree.branch}\t0\n")
+
+
+def registry_candidates(scan_roots: list[Path]) -> list[Candidate]:
+    registry = registry_path()
+    if not registry.exists():
+        return []
+
+    candidates: list[Candidate] = []
+    seen: set[tuple[Path, Path]] = set()
+
+    with registry.open("r", encoding="utf-8") as file:
+        for line in file:
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < 3:
+                continue
+
+            primary = canonical(fields[0])
+            worktree_path = canonical(fields[1])
+            branch = fields[2] or "detached"
+
+            if not any(path_is_under(primary, root) or path_is_under(worktree_path, root) for root in scan_roots):
+                continue
+
+            key = (primary, worktree_path)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            if worktree_path.exists():
+                candidates.append(Candidate(primary, Worktree(worktree_path, branch), dirty=None))
+
+    return candidates
 
 
 def parse_worktree_list(output: str) -> list[Worktree]:
@@ -142,12 +201,66 @@ def primary_from_git_file(repo_path: Path) -> Path | None:
     return canonical(primary_text)
 
 
+def worktree_path_from_gitdir_marker(marker_file: Path) -> Path | None:
+    try:
+        gitdir_path = Path(marker_file.read_text(encoding="utf-8").strip())
+    except OSError:
+        return None
+
+    if not gitdir_path.is_absolute():
+        gitdir_path = marker_file.parent / gitdir_path
+
+    git_file = gitdir_path.resolve().parent / ".git"
+    if git_file.exists():
+        return canonical(git_file.parent)
+
+    return None
+
+
+def branch_from_marker(marker_dir: Path) -> str:
+    try:
+        head = (marker_dir / "HEAD").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "detached"
+
+    prefix = "ref: refs/heads/"
+    if head.startswith(prefix):
+        return head.removeprefix(prefix)
+
+    return "detached"
+
+
+def read_marker_candidates(primary: Path) -> list[Worktree]:
+    worktrees_dir = primary / ".git" / "worktrees"
+    if not worktrees_dir.is_dir():
+        return []
+
+    repo_name = primary.name
+    parent = primary.parent
+    prefix = str(parent / f"{repo_name}-")
+    worktrees: list[Worktree] = []
+
+    for marker_file in sorted(worktrees_dir.glob("*/gitdir")):
+        worktree_path = worktree_path_from_gitdir_marker(marker_file)
+        if worktree_path is None:
+            continue
+        if str(worktree_path).startswith(prefix):
+            worktrees.append(
+                Worktree(
+                    worktree_path,
+                    branch_from_marker(marker_file.parent),
+                )
+            )
+
+    return worktrees
+
+
 def discover_primary_worktrees(scan_root: Path, max_depth: int | None) -> list[Path]:
     primary_worktrees: list[Path] = []
     seen: set[Path] = set()
 
     def add_primary(primary: Path | None) -> None:
-        if primary is None or primary in seen:
+        if primary is None or primary in seen or not primary.exists():
             return
         seen.add(primary)
         primary_worktrees.append(primary)
@@ -162,7 +275,7 @@ def discover_primary_worktrees(scan_root: Path, max_depth: int | None) -> list[P
 
         if ".git" in dirs:
             primary = canonical(current_path)
-            if has_launcher_sibling(primary):
+            if (primary / ".git" / "worktrees").is_dir() and has_launcher_sibling(primary):
                 add_primary(primary)
             dirs.remove(".git")
 
@@ -177,7 +290,28 @@ def discover_primary_worktrees(scan_root: Path, max_depth: int | None) -> list[P
     return primary_worktrees
 
 
+def refresh_registry(scan_roots: list[Path], max_depth: int | None) -> list[Candidate]:
+    candidates: list[Candidate] = []
+    seen: set[tuple[Path, Path]] = set()
+
+    for scan_root in scan_roots:
+        for primary in discover_primary_worktrees(scan_root, max_depth):
+            for worktree in candidate_worktrees(primary):
+                key = (primary, worktree.path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                append_registry_entry(primary, worktree)
+                candidates.append(Candidate(primary, worktree, dirty=None))
+
+    return candidates
+
+
 def candidate_worktrees(primary: Path) -> list[Worktree]:
+    marker_worktrees = read_marker_candidates(primary)
+    if marker_worktrees:
+        return marker_worktrees
+
     worktrees = parse_worktree_list(require_git(primary, ["worktree", "list", "--porcelain"]))
     repo_name = primary.name
     parent = primary.parent
@@ -301,6 +435,61 @@ def cleanup_primaries(primaries: list[Path], args: argparse.Namespace) -> int:
     return 0
 
 
+def cleanup_candidates(candidates: list[Candidate], args: argparse.Namespace) -> int:
+    if not candidates:
+        print("No launcher-style sibling worktrees found.")
+        return 0
+
+    totals = Totals()
+    by_primary: dict[Path, list[Candidate]] = {}
+    for candidate in candidates:
+        by_primary.setdefault(candidate.primary, []).append(candidate)
+
+    for primary, primary_candidates in by_primary.items():
+        print(f"\n{display_path(primary, args)} ({len(primary_candidates)})")
+        for candidate in primary_candidates:
+            candidate_to_print = candidate
+            if args.yes:
+                dirty = True if not candidate.worktree.path.exists() else is_dirty(candidate.worktree.path)
+                candidate_to_print = Candidate(candidate.primary, candidate.worktree, dirty)
+
+            if candidate_to_print.dirty is None:
+                totals.clean += 1
+            elif candidate_to_print.dirty:
+                totals.dirty += 1
+            else:
+                totals.clean += 1
+
+            if not args.yes:
+                print_candidate(candidate_to_print, args)
+                continue
+
+            if candidate_to_print.dirty and not args.force:
+                totals.skipped += 1
+                print_candidate(candidate_to_print, args, action="skipped")
+                continue
+
+            remove_candidate(candidate_to_print, force=args.force)
+            totals.removed += 1
+            print_candidate(candidate_to_print, args, action="removed")
+
+        if args.prune:
+            require_git(primary, ["worktree", "prune"])
+            print("  pruned       stale Git worktree metadata")
+
+    print()
+    if not args.yes:
+        print(f"Summary: {totals.clean} candidates, 0 removed.")
+        print("Dry run. Add --yes to check dirty state and remove clean worktrees.")
+    else:
+        print(
+            f"Summary: {totals.clean} clean, {totals.dirty} dirty, "
+            f"{totals.removed} removed, {totals.skipped} skipped."
+        )
+
+    return 0
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="codex cleanup",
@@ -310,6 +499,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--force", action="store_true", help="remove dirty candidates too; requires --yes")
     parser.add_argument("--prune", action="store_true", help="run git worktree prune after cleanup")
     parser.add_argument("--scan", action="append", default=[], metavar="DIR", help="scan for Git repos under DIR")
+    parser.add_argument("--refresh", action="store_true", help="import existing worktrees into the local registry")
     parser.add_argument("--max-depth", type=int, default=4, metavar="N", help="limit --scan recursion depth")
     parser.add_argument("--unbounded", action="store_true", help="disable the scan depth limit")
     return parser.parse_args(argv)
@@ -330,8 +520,6 @@ def main(argv: list[str]) -> int:
 
     try:
         if args.scan:
-            primaries: list[Path] = []
-            seen: set[Path] = set()
             scan_roots = [canonical(scan_arg) for scan_arg in args.scan]
             args.display_base = Path(os.path.commonpath([str(root) for root in scan_roots]))
 
@@ -341,17 +529,20 @@ def main(argv: list[str]) -> int:
                 else:
                     print(f"Scanning {scan_root} (max depth {max_depth})")
 
-                for primary in discover_primary_worktrees(scan_root, max_depth):
-                    if primary not in seen:
-                        seen.add(primary)
-                        primaries.append(primary)
+            if args.refresh:
+                candidates = refresh_registry(scan_roots, max_depth)
+            else:
+                candidates = registry_candidates(scan_roots)
 
-            if not primaries:
+            if not candidates:
                 for scan_root in scan_roots:
                     print(f"No Git repositories found under {scan_root}.")
+                if not args.refresh:
+                    print(f"Registry: {registry_path()}")
+                    print("Run with --refresh to import existing worktrees.")
                 return 0
 
-            return cleanup_primaries(primaries, args)
+            return cleanup_candidates(candidates, args)
 
         if not is_inside_git_repo():
             print("codex cleanup: run inside a Git repository, or use --scan DIR", file=sys.stderr)
