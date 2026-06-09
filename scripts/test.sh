@@ -106,6 +106,23 @@ test -e "$tmpdir/dirty-keep-me/.git"
 cleanup_help_output="$("$repo_root/bin/codex-worktree" cleanup --help 2>&1)"
 assert_contains "$cleanup_help_output" "Usage: codex cleanup"
 
+scan_root="$tmpdir/scan-root"
+mkdir -p "$scan_root/group-a" "$scan_root/group-b"
+scan_repo_a="$scan_root/group-a/alpha"
+scan_repo_b="$scan_root/group-b/beta"
+make_repo "$scan_repo_a"
+make_repo "$scan_repo_b"
+git -C "$scan_repo_a" worktree add -q -b jesse/remove-alpha "$scan_root/group-a/alpha-remove-alpha"
+git -C "$scan_repo_b" worktree add -q -b jesse/remove-beta "$scan_root/group-b/beta-remove-beta"
+
+scan_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$scan_root" --yes 2>&1)"
+
+assert_contains "$scan_output" "Scanning: $scan_root"
+assert_contains "$scan_output" "removed $scan_root/group-a/alpha-remove-alpha"
+assert_contains "$scan_output" "removed $scan_root/group-b/beta-remove-beta"
+test ! -e "$scan_root/group-a/alpha-remove-alpha"
+test ! -e "$scan_root/group-b/beta-remove-beta"
+
 install_home="$tmpdir/home"
 mkdir -p "$install_home"
 HOME="$install_home" "$repo_root/scripts/install.sh" >/dev/null

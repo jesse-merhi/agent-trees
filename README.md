@@ -115,7 +115,7 @@ This wrapper adds a safer launcher-specific flow:
 codex cleanup
 ```
 
-That lists sibling worktrees matching the launcher naming pattern:
+That lists sibling worktrees for the current repo matching the launcher naming pattern:
 
 ```text
 ../repo-task-name
@@ -146,6 +146,22 @@ codex cleanup --yes --force
 ```
 
 Use that only after checking the worktree. It passes `--force` to `git worktree remove`.
+
+To scan a whole directory tree for Git repos:
+
+```sh
+codex cleanup --scan ~/repos
+```
+
+That finds Git repos under `~/repos`, deduplicates linked worktrees back to their primary checkout, and runs the same launcher-style cleanup for each repo.
+
+It is still a dry run unless you pass `--yes`:
+
+```sh
+codex cleanup --scan ~/repos --yes
+```
+
+The scan skips common generated directories such as `node_modules`, `.cache`, `.next`, `dist`, and `build`.
 
 ## Settings
 
