@@ -5,6 +5,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,14 @@ class Candidate:
     primary: Path
     worktree: Worktree
     dirty: bool | None
+
+
+@dataclass(frozen=True)
+class RegistryEntry:
+    primary: Path
+    worktree: Path
+    branch: str
+    recorded_at: str
 
 
 @dataclass
@@ -73,41 +82,75 @@ def path_is_under(path: Path, root: Path) -> bool:
         return False
 
 
-def append_registry_entry(primary: Path, worktree: Worktree) -> None:
-    registry = registry_path()
-    registry.parent.mkdir(parents=True, exist_ok=True)
-    with registry.open("a", encoding="utf-8") as file:
-        file.write(f"{primary}\t{worktree.path}\t{worktree.branch}\t0\n")
-
-
-def registry_candidates(scan_roots: list[Path]) -> list[Candidate]:
+def read_registry_entries() -> list[RegistryEntry]:
     registry = registry_path()
     if not registry.exists():
         return []
 
-    candidates: list[Candidate] = []
-    seen: set[tuple[Path, Path]] = set()
-
+    entries: list[RegistryEntry] = []
     with registry.open("r", encoding="utf-8") as file:
         for line in file:
             fields = line.rstrip("\n").split("\t")
             if len(fields) < 3:
                 continue
 
-            primary = canonical(fields[0])
-            worktree_path = canonical(fields[1])
-            branch = fields[2] or "detached"
+            entries.append(
+                RegistryEntry(
+                    primary=canonical(fields[0]),
+                    worktree=canonical(fields[1]),
+                    branch=fields[2] or "detached",
+                    recorded_at=fields[3] if len(fields) > 3 else "0",
+                )
+            )
 
-            if not any(path_is_under(primary, root) or path_is_under(worktree_path, root) for root in scan_roots):
-                continue
+    return entries
 
-            key = (primary, worktree_path)
-            if key in seen:
-                continue
-            seen.add(key)
 
-            if worktree_path.exists():
-                candidates.append(Candidate(primary, Worktree(worktree_path, branch), dirty=None))
+def write_registry_entries(entries: list[RegistryEntry]) -> None:
+    registry = registry_path()
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    temp_registry = registry.with_suffix(f"{registry.suffix}.tmp")
+
+    with temp_registry.open("w", encoding="utf-8") as file:
+        for entry in entries:
+            file.write(f"{entry.primary}\t{entry.worktree}\t{entry.branch}\t{entry.recorded_at}\n")
+
+    temp_registry.replace(registry)
+
+
+def compact_registry(new_entries: list[RegistryEntry]) -> None:
+    by_key: dict[tuple[Path, Path], RegistryEntry] = {}
+
+    for entry in read_registry_entries():
+        if entry.worktree.exists():
+            by_key[(entry.primary, entry.worktree)] = entry
+
+    for entry in new_entries:
+        by_key[(entry.primary, entry.worktree)] = entry
+
+    write_registry_entries(
+        [
+            by_key[key]
+            for key in sorted(by_key, key=lambda item: (str(item[0]), str(item[1])))
+        ]
+    )
+
+
+def registry_candidates(scan_roots: list[Path]) -> list[Candidate]:
+    candidates: list[Candidate] = []
+    seen: set[tuple[Path, Path]] = set()
+
+    for entry in read_registry_entries():
+        if not any(path_is_under(entry.primary, root) or path_is_under(entry.worktree, root) for root in scan_roots):
+            continue
+
+        key = (entry.primary, entry.worktree)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        if entry.worktree.exists():
+            candidates.append(Candidate(entry.primary, Worktree(entry.worktree, entry.branch), dirty=None))
 
     return candidates
 
@@ -165,18 +208,7 @@ def current_primary_worktree() -> Path:
     return primary
 
 
-def has_launcher_sibling(primary: Path) -> bool:
-    prefix = f"{primary.name}-"
-    try:
-        for entry in primary.parent.iterdir():
-            if entry.is_dir() and entry.name.startswith(prefix):
-                return True
-    except OSError:
-        return False
-    return False
-
-
-def primary_from_git_file(repo_path: Path) -> Path | None:
+def primary_from_worktree_git_file(repo_path: Path) -> Path | None:
     git_file = repo_path / ".git"
     try:
         content = git_file.read_text(encoding="utf-8").strip()
@@ -190,15 +222,13 @@ def primary_from_git_file(repo_path: Path) -> Path | None:
     git_dir = Path(git_dir_text)
     if not git_dir.is_absolute():
         git_dir = repo_path / git_dir
-    git_dir = git_dir.resolve()
 
     marker = f"{os.sep}.git{os.sep}worktrees{os.sep}"
-    git_dir_string = str(git_dir)
+    git_dir_string = str(git_dir.resolve())
     if marker not in git_dir_string:
-        return primary_for_repo_path(repo_path)
+        return None
 
-    primary_text = git_dir_string.split(marker, 1)[0]
-    return canonical(primary_text)
+    return canonical(git_dir_string.split(marker, 1)[0])
 
 
 def worktree_path_from_gitdir_marker(marker_file: Path) -> Path | None:
@@ -255,54 +285,130 @@ def read_marker_candidates(primary: Path) -> list[Worktree]:
     return worktrees
 
 
-def discover_primary_worktrees(scan_root: Path, max_depth: int | None) -> list[Path]:
-    primary_worktrees: list[Path] = []
-    seen: set[Path] = set()
+def gitdir_markers_for_primary(primary: Path) -> list[Path]:
+    worktrees_dir = primary / ".git" / "worktrees"
+    if not worktrees_dir.is_dir():
+        return []
 
-    def add_primary(primary: Path | None) -> None:
-        if primary is None or primary in seen or not primary.exists():
+    markers: list[Path] = []
+    try:
+        marker_dirs = sorted(worktrees_dir.iterdir())
+    except OSError:
+        return []
+
+    for marker_dir in marker_dirs:
+        marker_file = marker_dir / "gitdir"
+        if marker_file.is_file():
+            markers.append(marker_file)
+
+    return markers
+
+
+def discover_marker_files(scan_root: Path, max_depth: int | None) -> list[Path]:
+    markers: list[Path] = []
+    seen_primaries: set[Path] = set()
+    stack: list[tuple[Path, int]] = [(scan_root, 0)]
+
+    def add_primary_markers(primary: Path) -> None:
+        if primary in seen_primaries:
             return
-        seen.add(primary)
-        primary_worktrees.append(primary)
+        seen_primaries.add(primary)
+        markers.extend(gitdir_markers_for_primary(primary))
 
-    for current, dirs, files in os.walk(scan_root):
-        current_path = Path(current)
+    while stack:
+        current, depth = stack.pop()
 
         try:
-            depth = len(current_path.relative_to(scan_root).parts)
-        except ValueError:
-            depth = 0
+            entries = list(os.scandir(current))
+        except OSError:
+            continue
 
-        if ".git" in dirs:
-            primary = canonical(current_path)
-            if (primary / ".git" / "worktrees").is_dir() and has_launcher_sibling(primary):
-                add_primary(primary)
-            dirs.remove(".git")
+        has_git_file = False
+        has_git_dir = False
+        for entry in entries:
+            if entry.name != ".git":
+                continue
+            if entry.is_file(follow_symlinks=False):
+                has_git_file = True
+            elif entry.is_dir(follow_symlinks=False):
+                has_git_dir = True
 
-        if ".git" in files:
-            add_primary(primary_from_git_file(canonical(current_path)))
+        if has_git_dir:
+            add_primary_markers(current)
+            continue
 
-        dirs[:] = [name for name in dirs if name not in SKIP_DIRS]
+        if has_git_file:
+            primary = primary_from_worktree_git_file(current)
+            if primary is not None:
+                add_primary_markers(primary)
+            continue
 
-        if max_depth is not None and depth >= max_depth:
-            dirs[:] = []
+        for entry in entries:
+            if not entry.is_dir(follow_symlinks=False):
+                continue
 
-    return primary_worktrees
+            if entry.name in SKIP_DIRS:
+                continue
+
+            entry_path = Path(entry.path)
+            if max_depth is None or depth < max_depth:
+                stack.append((entry_path, depth + 1))
+
+    return markers
+
+
+def candidate_from_marker(marker_file: Path) -> Candidate | None:
+    marker_text = f"{os.sep}.git{os.sep}worktrees{os.sep}"
+    marker_string = str(marker_file.resolve())
+    if marker_text not in marker_string:
+        return None
+
+    primary = canonical(marker_string.split(marker_text, 1)[0])
+    worktree_path = worktree_path_from_gitdir_marker(marker_file)
+    if worktree_path is None:
+        return None
+
+    repo_name = primary.name
+    parent = primary.parent
+    prefix = str(parent / f"{repo_name}-")
+    if not str(worktree_path).startswith(prefix):
+        return None
+
+    return Candidate(
+        primary,
+        Worktree(worktree_path, branch_from_marker(marker_file.parent)),
+        dirty=None,
+    )
 
 
 def refresh_registry(scan_roots: list[Path], max_depth: int | None) -> list[Candidate]:
     candidates: list[Candidate] = []
     seen: set[tuple[Path, Path]] = set()
+    registry_entries: list[RegistryEntry] = []
+    recorded_at = str(int(time.time()))
 
     for scan_root in scan_roots:
-        for primary in discover_primary_worktrees(scan_root, max_depth):
-            for worktree in candidate_worktrees(primary):
-                key = (primary, worktree.path)
-                if key in seen:
-                    continue
-                seen.add(key)
-                append_registry_entry(primary, worktree)
-                candidates.append(Candidate(primary, worktree, dirty=None))
+        for marker_file in discover_marker_files(scan_root, max_depth):
+            candidate = candidate_from_marker(marker_file)
+            if candidate is None:
+                continue
+
+            key = (candidate.primary, candidate.worktree.path)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            registry_entries.append(
+                RegistryEntry(
+                    candidate.primary,
+                    candidate.worktree.path,
+                    candidate.worktree.branch,
+                    recorded_at,
+                )
+            )
+            candidates.append(candidate)
+
+    compact_registry(registry_entries)
 
     return candidates
 

@@ -153,6 +153,17 @@ marker_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$marker_root" -
 assert_contains "$marker_output" "gamma (1)"
 assert_contains "$marker_output" "projects/gamma-marker"
 
+linked_scan_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$marker_root/projects/gamma-marker" --refresh 2>&1)"
+assert_contains "$linked_scan_output" "gamma (1)"
+assert_contains "$linked_scan_output" "[jesse/marker]"
+
+"$repo_root/bin/codex-worktree" cleanup --scan "$marker_root" --refresh >/dev/null
+gamma_marker_count="$(grep -F -c "$marker_root/projects/gamma-marker" "$WORKTREE_LAUNCHER_REGISTRY")"
+if [[ "$gamma_marker_count" != "1" ]]; then
+  printf 'Expected registry refresh to keep one gamma-marker row, found %s.\n' "$gamma_marker_count" >&2
+  exit 1
+fi
+
 install_home="$tmpdir/home"
 mkdir -p "$install_home"
 HOME="$install_home" "$repo_root/scripts/install.sh" >/dev/null

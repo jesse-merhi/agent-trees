@@ -172,7 +172,7 @@ To import older worktrees that were created before the registry existed:
 codex cleanup --scan ~/repos --refresh
 ```
 
-`--refresh` is the slower path. It reads Git's worktree marker files and updates the registry. After that, normal scan uses the registry.
+`--refresh` reads Git's worktree marker files and updates the registry. It stops at Git checkout boundaries instead of walking repo contents, so it stays quick even when worktrees contain large source trees. After that, normal scan uses the registry.
 
 To keep that scan fast, recursion is capped at depth 4 by default. Override it when needed:
 
