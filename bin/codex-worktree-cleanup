@@ -1,258 +1,369 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+from __future__ import annotations
 
-usage() {
-  cat <<'EOF'
-Usage: codex cleanup [OPTIONS]
+import argparse
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
 
-List and remove clean launcher-created sibling worktrees.
+SKIP_DIRS = {"node_modules", ".cache", ".next", "dist", "build"}
 
-Options:
-  -y, --yes    Remove clean candidates. Without this, only list them.
-      --force  Remove dirty candidates too. Requires --yes.
-      --prune  Run git worktree prune after cleanup.
-      --scan DIR
-                Recursively find Git repos under DIR and clean each one.
-  -h, --help   Show this help.
-EOF
-}
 
-canonical_dir() {
-  cd "$1"
-  pwd -P
-}
+@dataclass(frozen=True)
+class Worktree:
+    path: Path
+    branch: str
 
-yes=false
-force=false
-prune=false
-scan_roots=()
 
-while [[ "$#" -gt 0 ]]; do
-  case "$1" in
-    -y|--yes)
-      yes=true
-      ;;
-    --force)
-      force=true
-      ;;
-    --prune)
-      prune=true
-      ;;
-    --scan)
-      shift
-      if [[ "${1:-}" == "" ]]; then
-        printf 'codex cleanup: --scan requires a directory\n' >&2
-        exit 2
-      fi
-      scan_roots+=("$(canonical_dir "$1")")
-      ;;
-    --scan=*)
-      scan_roots+=("$(canonical_dir "${1#--scan=}")")
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      printf 'codex cleanup: unknown option: %s\n' "$1" >&2
-      usage >&2
-      exit 2
-      ;;
-  esac
-  shift
-done
+@dataclass(frozen=True)
+class Candidate:
+    primary: Path
+    worktree: Worktree
+    dirty: bool | None
 
-contains_path() {
-  local needle="$1"
-  shift
-  local candidate
 
-  for candidate in "$@"; do
-    [[ "$candidate" == "$needle" ]] && return 0
-  done
+@dataclass
+class Totals:
+    clean: int = 0
+    dirty: int = 0
+    removed: int = 0
+    skipped: int = 0
 
-  return 1
-}
 
-primary_for_repo_path() {
-  local repo_path="$1"
-  local repo_root
-  local primary_worktree
+def run_git(cwd: Path, args: list[str], *, check: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=check,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
 
-  repo_root="$(canonical_dir "$(git -C "$repo_path" rev-parse --show-toplevel)")"
-  primary_worktree="$(git -C "$repo_root" worktree list --porcelain | awk 'NR == 1 && $1 == "worktree" { print substr($0, 10); exit }')"
-  canonical_dir "$primary_worktree"
-}
 
-cleanup_primary_worktree() {
-  local primary_worktree="$1"
-  local repo_name
-  local parent_dir
-  local candidate_prefix
-  local current_path=""
-  local current_branch=""
-  local paths=()
-  local branches=()
-  local removed=0
-  local skipped=0
-  local index
-  local path
-  local branch
-  local status
-  local state
-  local remove_args
+def require_git(cwd: Path, args: list[str]) -> str:
+    result = run_git(cwd, args)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
+    return result.stdout
 
-  repo_name="$(basename "$primary_worktree")"
-  parent_dir="$(dirname "$primary_worktree")"
-  candidate_prefix="$parent_dir/$repo_name-"
 
-  flush_worktree() {
-    if [[ -z "$current_path" ]]; then
-      return
-    fi
+def canonical(path: str | Path) -> Path:
+    return Path(path).expanduser().resolve()
 
-    if [[ "$current_path" != "$primary_worktree" && "$current_path" == "$candidate_prefix"* ]]; then
-      paths+=("$current_path")
-      branches+=("${current_branch:-detached}")
-    fi
 
-    current_path=""
-    current_branch=""
-  }
+def parse_worktree_list(output: str) -> list[Worktree]:
+    worktrees: list[Worktree] = []
+    current_path: Path | None = None
+    current_branch = "detached"
 
-  while IFS= read -r line; do
-    if [[ -z "$line" ]]; then
-      flush_worktree
-      continue
-    fi
+    def flush() -> None:
+        nonlocal current_path, current_branch
+        if current_path is not None:
+            worktrees.append(Worktree(current_path, current_branch))
+        current_path = None
+        current_branch = "detached"
 
-    case "$line" in
-      worktree\ *)
-        flush_worktree
-        current_path="${line#worktree }"
-        ;;
-      branch\ refs/heads/*)
-        current_branch="${line#branch refs/heads/}"
-        ;;
-      branch\ *)
-        current_branch="${line#branch }"
-        ;;
-    esac
-  done < <(git -C "$primary_worktree" worktree list --porcelain)
+    for line in output.splitlines():
+        if not line:
+            flush()
+            continue
 
-  flush_worktree
+        if line.startswith("worktree "):
+            flush()
+            current_path = canonical(line.removeprefix("worktree "))
+        elif line.startswith("branch refs/heads/"):
+            current_branch = line.removeprefix("branch refs/heads/")
+        elif line.startswith("branch "):
+            current_branch = line.removeprefix("branch ")
 
-  printf 'Primary: %s\n' "$primary_worktree"
+    flush()
+    return worktrees
 
-  if [[ "${#paths[@]}" -eq 0 ]]; then
-    printf 'No launcher-style sibling worktrees found.\n'
-    if [[ "$prune" == true ]]; then
-      git -C "$primary_worktree" worktree prune
-      printf 'Pruned stale Git worktree metadata.\n'
-    fi
-    return
-  fi
 
-  for index in "${!paths[@]}"; do
-    path="${paths[$index]}"
-    branch="${branches[$index]}"
+def primary_for_repo_path(repo_path: Path) -> Path | None:
+    result = run_git(repo_path, ["worktree", "list", "--porcelain"])
+    if result.returncode != 0:
+        return None
 
-    if [[ ! -d "$path" ]]; then
-      printf 'missing %s [%s]\n' "$path" "$branch"
-      skipped=$((skipped + 1))
-      continue
-    fi
+    worktrees = parse_worktree_list(result.stdout)
+    if not worktrees:
+        return None
 
-    status="$(git -C "$path" status --porcelain --untracked-files=all)"
-    if [[ -n "$status" ]]; then
-      state="dirty"
-    else
-      state="clean"
-    fi
+    return worktrees[0].path
 
-    if [[ "$yes" != true ]]; then
-      printf '%s %s [%s]\n' "$state" "$path" "$branch"
-      continue
-    fi
 
-    if [[ "$state" == "dirty" && "$force" != true ]]; then
-      printf 'skipped dirty %s [%s]\n' "$path" "$branch"
-      skipped=$((skipped + 1))
-      continue
-    fi
+def is_inside_git_repo() -> bool:
+    return run_git(Path.cwd(), ["rev-parse", "--is-inside-work-tree"]).returncode == 0
 
-    remove_args=(worktree remove)
-    if [[ "$force" == true ]]; then
-      remove_args+=(--force)
-    fi
-    remove_args+=("$path")
 
-    git -C "$primary_worktree" "${remove_args[@]}"
-    printf 'removed %s [%s]\n' "$path" "$branch"
-    removed=$((removed + 1))
-  done
+def current_primary_worktree() -> Path:
+    repo_root = canonical(require_git(Path.cwd(), ["rev-parse", "--show-toplevel"]).strip())
+    primary = primary_for_repo_path(repo_root)
+    if primary is None:
+        raise RuntimeError(f"could not resolve primary worktree for {repo_root}")
+    return primary
 
-  if [[ "$yes" != true ]]; then
-    printf 'Dry run. Re-run with --yes to remove clean worktrees.\n'
-  fi
 
-  if [[ "$prune" == true ]]; then
-    git -C "$primary_worktree" worktree prune
-    printf 'Pruned stale Git worktree metadata.\n'
-  fi
+def has_launcher_sibling(primary: Path) -> bool:
+    prefix = f"{primary.name}-"
+    try:
+        for entry in primary.parent.iterdir():
+            if entry.is_dir() and entry.name.startswith(prefix):
+                return True
+    except OSError:
+        return False
+    return False
 
-  printf 'Summary: %s removed, %s skipped.\n' "$removed" "$skipped"
-}
 
-scan_for_primary_worktrees() {
-  local scan_root="$1"
-  local git_marker
-  local repo_dir
-  local primary_worktree
-  local primary_worktrees=()
+def primary_from_git_file(repo_path: Path) -> Path | None:
+    git_file = repo_path / ".git"
+    try:
+        content = git_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
 
-  printf 'Scanning: %s\n' "$scan_root"
+    if not content.startswith("gitdir:"):
+        return None
 
-  while IFS= read -r git_marker; do
-    repo_dir="$(dirname "$git_marker")"
-    if ! primary_worktree="$(primary_for_repo_path "$repo_dir" 2>/dev/null)"; then
-      continue
-    fi
+    git_dir_text = content.removeprefix("gitdir:").strip()
+    git_dir = Path(git_dir_text)
+    if not git_dir.is_absolute():
+        git_dir = repo_path / git_dir
+    git_dir = git_dir.resolve()
 
-    if [[ "${#primary_worktrees[@]}" -eq 0 ]] || ! contains_path "$primary_worktree" "${primary_worktrees[@]}"; then
-      primary_worktrees+=("$primary_worktree")
-    fi
-  done < <(
-    find "$scan_root" \
-      \( -type d \( -name node_modules -o -name .cache -o -name .next -o -name dist -o -name build \) -prune \) -o \
-      \( -name .git \( -type d -o -type f \) -print \)
-  )
+    marker = f"{os.sep}.git{os.sep}worktrees{os.sep}"
+    git_dir_string = str(git_dir)
+    if marker not in git_dir_string:
+        return primary_for_repo_path(repo_path)
 
-  if [[ "${#primary_worktrees[@]}" -eq 0 ]]; then
-    printf 'No Git repositories found under %s.\n' "$scan_root"
-    return
-  fi
+    primary_text = git_dir_string.split(marker, 1)[0]
+    return canonical(primary_text)
 
-  for primary_worktree in "${primary_worktrees[@]}"; do
-    cleanup_primary_worktree "$primary_worktree"
-  done
-}
 
-if [[ "$force" == true && "$yes" != true ]]; then
-  printf 'codex cleanup: --force requires --yes\n' >&2
-  exit 2
-fi
+def discover_primary_worktrees(scan_root: Path, max_depth: int | None) -> list[Path]:
+    primary_worktrees: list[Path] = []
+    seen: set[Path] = set()
 
-if [[ "${#scan_roots[@]}" -gt 0 ]]; then
-  for scan_root in "${scan_roots[@]}"; do
-    scan_for_primary_worktrees "$scan_root"
-  done
-  exit 0
-fi
+    def add_primary(primary: Path | None) -> None:
+        if primary is None or primary in seen:
+            return
+        seen.add(primary)
+        primary_worktrees.append(primary)
 
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  printf 'codex cleanup: run inside a Git repository\n' >&2
-  exit 1
-fi
+    for current, dirs, files in os.walk(scan_root):
+        current_path = Path(current)
 
-cleanup_primary_worktree "$(primary_for_repo_path "$(pwd -P)")"
+        try:
+            depth = len(current_path.relative_to(scan_root).parts)
+        except ValueError:
+            depth = 0
+
+        if ".git" in dirs:
+            primary = canonical(current_path)
+            if has_launcher_sibling(primary):
+                add_primary(primary)
+            dirs.remove(".git")
+
+        if ".git" in files:
+            add_primary(primary_from_git_file(canonical(current_path)))
+
+        dirs[:] = [name for name in dirs if name not in SKIP_DIRS]
+
+        if max_depth is not None and depth >= max_depth:
+            dirs[:] = []
+
+    return primary_worktrees
+
+
+def candidate_worktrees(primary: Path) -> list[Worktree]:
+    worktrees = parse_worktree_list(require_git(primary, ["worktree", "list", "--porcelain"]))
+    repo_name = primary.name
+    parent = primary.parent
+    prefix = str(parent / f"{repo_name}-")
+
+    return [
+        worktree
+        for worktree in worktrees
+        if worktree.path != primary and str(worktree.path).startswith(prefix)
+    ]
+
+
+def is_dirty(path: Path) -> bool:
+    result = run_git(path, ["status", "--porcelain", "--untracked-files=all"])
+    return bool(result.stdout.strip())
+
+
+def collect_candidates(primary: Path, *, check_dirty: bool) -> list[Candidate]:
+    candidates: list[Candidate] = []
+    for worktree in candidate_worktrees(primary):
+        if not check_dirty:
+            candidates.append(Candidate(primary, worktree, dirty=None))
+            continue
+
+        if not worktree.path.exists():
+            candidates.append(Candidate(primary, worktree, dirty=True))
+        else:
+            candidates.append(Candidate(primary, worktree, dirty=is_dirty(worktree.path)))
+    return candidates
+
+
+def display_path(path: Path, args: argparse.Namespace) -> str:
+    display_base = getattr(args, "display_base", None)
+    if display_base is None:
+        return str(path)
+
+    try:
+        return str(path.relative_to(display_base))
+    except ValueError:
+        return str(path)
+
+
+def print_candidate(candidate: Candidate, args: argparse.Namespace, *, action: str | None = None) -> None:
+    if candidate.dirty is None:
+        state = "candidate"
+    else:
+        state = "dirty" if candidate.dirty else "clean"
+
+    if action == "skipped" and candidate.dirty:
+        label = "skipped dirty"
+    elif action is not None:
+        label = action
+    else:
+        label = f"{state:<5}"
+    print(f"  {label:<13} {display_path(candidate.worktree.path, args)}  [{candidate.worktree.branch}]")
+
+
+def remove_candidate(candidate: Candidate, *, force: bool) -> None:
+    args = ["worktree", "remove"]
+    if force:
+        args.append("--force")
+    args.append(str(candidate.worktree.path))
+    result = run_git(candidate.primary, args)
+    if result.returncode != 0:
+        message = result.stderr.strip() or f"failed to remove {candidate.worktree.path}"
+        raise RuntimeError(message)
+
+
+def cleanup_primaries(primaries: list[Path], args: argparse.Namespace) -> int:
+    totals = Totals()
+    repos_with_candidates = 0
+    check_dirty = args.yes
+
+    for primary in primaries:
+        candidates = collect_candidates(primary, check_dirty=check_dirty)
+        if not candidates:
+            continue
+
+        repos_with_candidates += 1
+        print(f"\n{display_path(primary, args)}")
+
+        for candidate in candidates:
+            if candidate.dirty is None:
+                totals.clean += 1
+            elif candidate.dirty:
+                totals.dirty += 1
+            else:
+                totals.clean += 1
+
+            if not args.yes:
+                print_candidate(candidate, args)
+                continue
+
+            if candidate.dirty and not args.force:
+                totals.skipped += 1
+                print_candidate(candidate, args, action="skipped")
+                continue
+
+            remove_candidate(candidate, force=args.force)
+            totals.removed += 1
+            print_candidate(candidate, args, action="removed")
+
+        if args.prune:
+            require_git(primary, ["worktree", "prune"])
+            print("  pruned   stale Git worktree metadata")
+
+    if repos_with_candidates == 0:
+        print("No launcher-style sibling worktrees found.")
+        return 0
+
+    print()
+    if not args.yes:
+        print(f"Summary: {totals.clean} candidates, 0 removed.")
+        print("Dry run. Add --yes to check dirty state and remove clean worktrees.")
+    else:
+        print(
+            f"Summary: {totals.clean} clean, {totals.dirty} dirty, "
+            f"{totals.removed} removed, {totals.skipped} skipped."
+        )
+
+    return 0
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="codex cleanup",
+        description="List and remove clean launcher-created sibling worktrees.",
+    )
+    parser.add_argument("-y", "--yes", action="store_true", help="remove clean candidates")
+    parser.add_argument("--force", action="store_true", help="remove dirty candidates too; requires --yes")
+    parser.add_argument("--prune", action="store_true", help="run git worktree prune after cleanup")
+    parser.add_argument("--scan", action="append", default=[], metavar="DIR", help="scan for Git repos under DIR")
+    parser.add_argument("--max-depth", type=int, default=4, metavar="N", help="limit --scan recursion depth")
+    parser.add_argument("--unbounded", action="store_true", help="disable the scan depth limit")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+
+    if args.force and not args.yes:
+        print("codex cleanup: --force requires --yes", file=sys.stderr)
+        return 2
+
+    if args.max_depth < 0:
+        print("codex cleanup: --max-depth must be non-negative", file=sys.stderr)
+        return 2
+
+    max_depth = None if args.unbounded else args.max_depth
+
+    try:
+        if args.scan:
+            primaries: list[Path] = []
+            seen: set[Path] = set()
+            scan_roots = [canonical(scan_arg) for scan_arg in args.scan]
+            args.display_base = Path(os.path.commonpath([str(root) for root in scan_roots]))
+
+            for scan_root in scan_roots:
+                if max_depth is None:
+                    print(f"Scanning {scan_root} (unbounded)")
+                else:
+                    print(f"Scanning {scan_root} (max depth {max_depth})")
+
+                for primary in discover_primary_worktrees(scan_root, max_depth):
+                    if primary not in seen:
+                        seen.add(primary)
+                        primaries.append(primary)
+
+            if not primaries:
+                for scan_root in scan_roots:
+                    print(f"No Git repositories found under {scan_root}.")
+                return 0
+
+            return cleanup_primaries(primaries, args)
+
+        if not is_inside_git_repo():
+            print("codex cleanup: run inside a Git repository, or use --scan DIR", file=sys.stderr)
+            return 1
+
+        primary = current_primary_worktree()
+        args.display_base = primary.parent
+        return cleanup_primaries([primary], args)
+    except RuntimeError as error:
+        print(f"codex cleanup: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -154,6 +154,21 @@ codex cleanup --scan ~/repos
 ```
 
 That finds Git repos under `~/repos`, deduplicates linked worktrees back to their primary checkout, and runs the same launcher-style cleanup for each repo.
+Dry-run output is compact and uses paths relative to the scan root.
+
+Dry-run does not run `git status` on every candidate, so it stays fast. When you pass `--yes`, cleanup checks dirty state before removing anything.
+
+To keep that scan fast, recursion is capped at depth 4 by default. Override it when needed:
+
+```sh
+codex cleanup --scan ~/repos --max-depth 6
+```
+
+For a full unbounded crawl:
+
+```sh
+codex cleanup --scan ~/repos --unbounded
+```
 
 It is still a dry run unless you pass `--yes`:
 

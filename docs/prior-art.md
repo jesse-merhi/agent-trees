@@ -10,7 +10,7 @@ git worktree remove <path>
 git worktree prune
 ```
 
-`git worktree prune` cleans stale Git metadata for worktrees whose directories are already gone. It does not decide which real task directories are safe to delete. The launcher cleanup command fills that gap for sibling worktrees it created, and `codex cleanup --scan <dir>` applies that same check across many repos.
+`git worktree prune` cleans stale Git metadata for worktrees whose directories are already gone. It does not decide which real task directories are safe to delete. The launcher cleanup command fills that gap for sibling worktrees it created, and `codex cleanup --scan <dir>` applies that same check across many repos. Recursive scan is depth-limited by default and avoids per-candidate dirty checks during dry-run, so it does not crawl every nested source, vendor, cache directory, and worktree status in a large development folder.
 
 ## What others are doing
 

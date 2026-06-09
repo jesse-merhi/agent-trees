@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 bash -n "$repo_root/bin/codex-worktree"
-bash -n "$repo_root/bin/codex-worktree-cleanup"
+python3 -m py_compile "$repo_root/bin/codex-worktree-cleanup"
 bash -n "$repo_root/scripts/install.sh"
 bash -n "$repo_root/scripts/uninstall.sh"
 
@@ -86,7 +86,8 @@ cleanup_output="$(
   "$repo_root/bin/codex-worktree" cleanup --yes 2>&1
 )"
 
-assert_contains "$cleanup_output" "removed $tmpdir/cleanup-remove-me"
+assert_contains "$cleanup_output" "removed"
+assert_contains "$cleanup_output" "cleanup-remove-me"
 test ! -e "$tmpdir/cleanup-remove-me"
 test -e "$cleanup_repo/.git"
 
@@ -100,11 +101,12 @@ dirty_output="$(
   "$repo_root/bin/codex-worktree" cleanup --yes 2>&1
 )"
 
-assert_contains "$dirty_output" "skipped dirty $tmpdir/dirty-keep-me"
+assert_contains "$dirty_output" "skipped dirty"
+assert_contains "$dirty_output" "dirty-keep-me"
 test -e "$tmpdir/dirty-keep-me/.git"
 
 cleanup_help_output="$("$repo_root/bin/codex-worktree" cleanup --help 2>&1)"
-assert_contains "$cleanup_help_output" "Usage: codex cleanup"
+assert_contains "$cleanup_help_output" "usage: codex cleanup"
 
 scan_root="$tmpdir/scan-root"
 mkdir -p "$scan_root/group-a" "$scan_root/group-b"
@@ -117,11 +119,23 @@ git -C "$scan_repo_b" worktree add -q -b jesse/remove-beta "$scan_root/group-b/b
 
 scan_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$scan_root" --yes 2>&1)"
 
-assert_contains "$scan_output" "Scanning: $scan_root"
-assert_contains "$scan_output" "removed $scan_root/group-a/alpha-remove-alpha"
-assert_contains "$scan_output" "removed $scan_root/group-b/beta-remove-beta"
+assert_contains "$scan_output" "Scanning $scan_root"
+assert_contains "$scan_output" "max depth 4"
+assert_contains "$scan_output" "removed"
+assert_contains "$scan_output" "group-a/alpha-remove-alpha"
+assert_contains "$scan_output" "group-b/beta-remove-beta"
 test ! -e "$scan_root/group-a/alpha-remove-alpha"
 test ! -e "$scan_root/group-b/beta-remove-beta"
+
+depth_root="$tmpdir/depth-root"
+mkdir -p "$depth_root/a/b/c/d"
+depth_repo="$depth_root/a/b/c/d/deep"
+make_repo "$depth_repo"
+
+depth_output="$("$repo_root/bin/codex-worktree" cleanup --scan "$depth_root" --max-depth 3 2>&1)"
+
+assert_contains "$depth_output" "Scanning $depth_root (max depth 3)"
+assert_contains "$depth_output" "No Git repositories found under $depth_root"
 
 install_home="$tmpdir/home"
 mkdir -p "$install_home"
