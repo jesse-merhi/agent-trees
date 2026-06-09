@@ -257,7 +257,7 @@ def cleanup_primaries(primaries: list[Path], args: argparse.Namespace) -> int:
             continue
 
         repos_with_candidates += 1
-        print(f"\n{display_path(primary, args)}")
+        print(f"\n{display_path(primary, args)} ({len(candidates)})")
 
         for candidate in candidates:
             if candidate.dirty is None:
