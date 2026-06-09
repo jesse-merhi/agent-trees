@@ -102,9 +102,15 @@ the interactive prompt is blank
 
 ## Naming
 
-There is no agent naming the worktree. The wrapper runs before Codex starts, so naming is local and deterministic.
+By default, the wrapper asks Codex for a short slug before creating the worktree:
 
-The generated name is a short slug from the prompt. It lowercases text, removes filler words like `please`, `you`, `the`, and `when`, keeps the first few meaningful words, and caps the result:
+```sh
+/opt/homebrew/bin/codex exec --ephemeral --skip-git-repo-check --ignore-rules -m gpt-5-nano ...
+```
+
+The prompt asks for only a lowercase kebab-case slug, then the wrapper validates and sanitizes the result.
+
+If Codex is unavailable, times out, or returns an invalid slug, the wrapper falls back to a local deterministic slug. The local fallback lowercases text, removes filler words like `please`, `you`, `the`, and `when`, keeps the first few meaningful words, and caps the result:
 
 ```text
 Can you please fix the broken login redirect when users sign in from Google?
@@ -123,6 +129,18 @@ Override the generated slug:
 
 ```sh
 CODEX_WORKTREE_SLUG=login-redirect codex "Fix login redirect"
+```
+
+Use local fallback naming only:
+
+```sh
+CODEX_WORKTREE_NAMER=local codex "Fix login redirect"
+```
+
+Override the Codex naming model or timeout:
+
+```sh
+CODEX_WORKTREE_NAMER_MODEL=gpt-5-nano CODEX_WORKTREE_NAMER_TIMEOUT=4 codex "Fix login redirect"
 ```
 
 Override the base branch:
