@@ -2,7 +2,6 @@
 set -euo pipefail
 
 CODEX_BIN="${CODEX_BIN:-/opt/homebrew/bin/codex}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 value_options=(
   -a --ask-for-approval
@@ -87,6 +86,52 @@ slugify() {
     | sed -E 's/[._-]+$//'
 }
 
+is_slug_filler_word() {
+  case "$1" in
+    a|an|and|are|as|at|be|can|could|do|does|doing|for|from|have|how|i|id|if|in|into|is|it|just|like|me|mind|my|of|ok|okay|on|only|or|please|pls|should|that|the|this|to|we|what|when|why|with|would|you|your)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+slug_from_prompt() {
+  local value="$1"
+  local word
+  local slug=""
+  local candidate
+  local kept=0
+
+  while IFS= read -r word; do
+    [[ -z "$word" ]] && continue
+    is_slug_filler_word "$word" && continue
+
+    candidate="${slug:+$slug-}$word"
+    if [[ "$kept" -gt 0 && "${#candidate}" -gt 40 ]]; then
+      break
+    fi
+
+    slug="$candidate"
+    kept=$((kept + 1))
+
+    if [[ "$kept" -ge 4 ]]; then
+      break
+    fi
+  done < <(
+    printf '%s\n' "$value" \
+      | tr '[:upper:]' '[:lower:]' \
+      | sed -E 's/[^a-z0-9]+/\n/g'
+  )
+
+  if [[ -z "$slug" ]]; then
+    slug="$(slugify "$value")"
+  fi
+
+  printf '%s' "$slug" | cut -c 1-48 | sed -E 's/[._-]+$//'
+}
+
 default_base_branch() {
   local origin_head
   local current_branch
@@ -114,9 +159,6 @@ default_base_branch() {
 }
 
 first_arg="${1:-}"
-if [[ "$first_arg" == "cleanup" || "$first_arg" == "worktrees" ]]; then
-  exec "$SCRIPT_DIR/codex-worktree-cleanup" "${@:2}"
-fi
 
 for arg in "$@"; do
   case "$arg" in
@@ -127,7 +169,7 @@ for arg in "$@"; do
 done
 
 case "$first_arg" in
-  help|login|logout|mcp|plugin|mcp-server|app|app-server|exec-server|remote-control|completion|update|doctor|features|archive|unarchive|fork|resume|cloud|sandbox|debug|apply)
+  help|login|logout|mcp|plugin|mcp-server|app|app-server|exec-server|remote-control|completion|update|doctor|features|archive|unarchive|fork|resume|cloud|sandbox|debug|apply|cleanup|worktrees)
     exec "$CODEX_BIN" "$@"
     ;;
 esac
@@ -168,10 +210,10 @@ fi
 
 slug="${CODEX_WORKTREE_SLUG:-}"
 if [[ -z "$slug" ]]; then
-  slug="$prompt_text"
+  slug="$(slug_from_prompt "$prompt_text")"
+else
+  slug="$(slugify "$slug")"
 fi
-
-slug="$(slugify "$slug")"
 
 if [[ -z "$slug" ]]; then
   exec "$CODEX_BIN" "$@"

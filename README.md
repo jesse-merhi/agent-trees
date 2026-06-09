@@ -17,20 +17,20 @@ What are we working on? (Enter = use this checkout):
 Type the task:
 
 ```text
-Fix login redirect
+Can you please fix the broken login redirect when users sign in from Google?
 ```
 
 It creates:
 
 ```text
-../repo-fix-login-redirect
-jesse/fix-login-redirect
+../repo-fix-broken-login-redirect
+jesse/fix-broken-login-redirect
 ```
 
 Then it launches:
 
 ```sh
-/opt/homebrew/bin/codex -C ../repo-fix-login-redirect "Fix login redirect"
+/opt/homebrew/bin/codex -C ../repo-fix-broken-login-redirect "Can you please fix the broken login redirect when users sign in from Google?"
 ```
 
 Press Enter on a blank prompt to run Codex in the current checkout without creating a worktree.
@@ -53,7 +53,6 @@ The installer copies:
 
 ```text
 bin/codex-worktree -> ~/.local/bin/codex-worktree
-bin/codex-worktree-cleanup -> ~/.local/bin/codex-worktree-cleanup
 ```
 
 and adds this shell alias if one is not already present:
@@ -88,6 +87,8 @@ codex doctor
 codex cloud
 codex app
 codex update
+codex cleanup
+codex worktrees
 ```
 
 It also passes through when:
@@ -99,84 +100,16 @@ no prompt was provided in a non-interactive shell
 the interactive prompt is blank
 ```
 
-## Cleanup
+## Naming
 
-Git has native worktree cleanup commands:
+There is no agent naming the worktree. The wrapper runs before Codex starts, so naming is local and deterministic.
 
-```sh
-git worktree list
-git worktree remove <path>
-git worktree prune
-```
-
-This wrapper adds a safer launcher-specific flow:
-
-```sh
-codex cleanup
-```
-
-That lists sibling worktrees for the current repo matching the launcher naming pattern:
+The generated name is a short slug from the prompt. It lowercases text, removes filler words like `please`, `you`, `the`, and `when`, keeps the first few meaningful words, and caps the result:
 
 ```text
-../repo-task-name
+Can you please fix the broken login redirect when users sign in from Google?
+-> fix-broken-login-redirect
 ```
-
-It does not remove anything unless you ask:
-
-```sh
-codex cleanup --yes
-```
-
-By default, dirty worktrees are skipped:
-
-```text
-skipped dirty /path/to/repo-task [jesse/task]
-```
-
-To include Git's stale metadata prune:
-
-```sh
-codex cleanup --yes --prune
-```
-
-There is also an explicit force path:
-
-```sh
-codex cleanup --yes --force
-```
-
-Use that only after checking the worktree. It passes `--force` to `git worktree remove`.
-
-To scan a whole directory tree for Git repos:
-
-```sh
-codex cleanup --scan ~/repos
-```
-
-That finds Git repos under `~/repos`, reads Git's own worktree marker files, deduplicates linked worktrees back to their primary checkout, and runs the same launcher-style cleanup for each repo.
-Dry-run output is compact and uses paths relative to the scan root.
-
-The scan does not use a wrapper cache. It stops at Git checkout boundaries and reads markers from `.git/worktrees/*/gitdir`, so it stays quick even when worktrees contain large source trees. When you pass `--yes`, cleanup checks dirty state before removing anything.
-
-To keep that scan fast, recursion is capped at depth 4 by default. Override it when needed:
-
-```sh
-codex cleanup --scan ~/repos --max-depth 6
-```
-
-For a full unbounded crawl:
-
-```sh
-codex cleanup --scan ~/repos --unbounded
-```
-
-It is still a dry run unless you pass `--yes`:
-
-```sh
-codex cleanup --scan ~/repos --yes
-```
-
-The scan skips common generated directories such as `node_modules`, `.cache`, `.next`, `dist`, and `build`.
 
 ## Settings
 

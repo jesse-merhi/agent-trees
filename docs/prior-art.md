@@ -10,7 +10,7 @@ git worktree remove <path>
 git worktree prune
 ```
 
-`git worktree prune` cleans stale Git metadata for worktrees whose directories are already gone. It does not decide which real task directories are safe to delete. The launcher cleanup command fills that gap for sibling worktrees it created. Recursive cleanup scans read Git's `.git/worktrees/*/gitdir` marker files directly, so there is no wrapper-owned worktree cache.
+`git worktree prune` cleans stale Git metadata for worktrees whose directories are already gone. This wrapper does not add a cleanup layer; cleanup stays with native Git commands.
 
 ## What others are doing
 
