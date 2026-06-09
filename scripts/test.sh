@@ -103,6 +103,9 @@ dirty_output="$(
 assert_contains "$dirty_output" "skipped dirty $tmpdir/dirty-keep-me"
 test -e "$tmpdir/dirty-keep-me/.git"
 
+cleanup_help_output="$("$repo_root/bin/codex-worktree" cleanup --help 2>&1)"
+assert_contains "$cleanup_help_output" "Usage: codex cleanup"
+
 install_home="$tmpdir/home"
 mkdir -p "$install_home"
 HOME="$install_home" "$repo_root/scripts/install.sh" >/dev/null

@@ -113,6 +113,11 @@ default_base_branch() {
   printf '%s\n' "${current_branch:-main}"
 }
 
+first_arg="${1:-}"
+if [[ "$first_arg" == "cleanup" || "$first_arg" == "worktrees" ]]; then
+  exec "$SCRIPT_DIR/codex-worktree-cleanup" "${@:2}"
+fi
+
 for arg in "$@"; do
   case "$arg" in
     -C|--cd|--help|-h|--version|-V)
@@ -120,11 +125,6 @@ for arg in "$@"; do
       ;;
   esac
 done
-
-first_arg="${1:-}"
-if [[ "$first_arg" == "cleanup" || "$first_arg" == "worktrees" ]]; then
-  exec "$SCRIPT_DIR/codex-worktree-cleanup" "${@:2}"
-fi
 
 case "$first_arg" in
   help|login|logout|mcp|plugin|mcp-server|app|app-server|exec-server|remote-control|completion|update|doctor|features|archive|unarchive|fork|resume|cloud|sandbox|debug|apply)
