@@ -56,10 +56,46 @@ direct smollm2 cold prompt after Ollama restart: timed out at 30s once
 ollama run smollm2:360m simple prompt: 17.4s
 ```
 
+Direct `llama-cli` tests:
+
+```text
+llama.cpp 9570
+qwen2.5:0.5b-instruct GGUF from Ollama
+no Ollama generation API
+no llama.cpp warmup run
+```
+
+| Path | Model | Extra setup | Timings | Quality | Result |
+| --- | --- | --- | ---: | ---: | --- |
+| `CODEX_WORKTREE_NAMER=llama` | `qwen2.5:0.5b-instruct` | `ollama show --modelfile` path lookup, then direct `llama-cli` | 1.1-1.8s model call | 5/6 good raw outputs | Best no-warm smart option |
+
+The weak direct-llama case was:
+
+```text
+Task: ok remove all the worktree cleanup shit and make current worktree names less scuffed
+Raw Qwen slug: git-keep
+Fallback slug: remove-all-worktree-cleanup
+```
+
+The wrapper rejects direct-llama slugs that do not share any meaningful word with the task, then falls back to deterministic local naming.
+
+Real wrapper smoke tests:
+
+```text
+CODEX_WORKTREE_NAMER=llama CODEX_BIN=/bin/echo "Can you please fix the broken login redirect when users sign in from Google?"
+-> demo-google-login-fix
+real 2.18s including git worktree add
+
+CODEX_WORKTREE_NAMER=llama CODEX_BIN=/bin/echo "ok remove all the worktree cleanup shit and make current worktree names less scuffed"
+-> demo-remove-all-worktree-cleanup
+real 2.26s including git worktree add
+```
+
 Decision:
 
 ```text
 Keep local deterministic naming as the default.
 Use Ollama with smollm2:360m as an opt-in smarter namer.
+Use direct llama.cpp with qwen2.5:0.5b-instruct as the opt-in no-warm smarter namer.
 Keep Codex naming opt-in only.
 ```

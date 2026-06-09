@@ -132,6 +132,57 @@ assert_contains "$codex_output" "codex-repair-google-signin-redirect"
 assert_contains "$codex_output" "jesse/repair-google-signin-redirect"
 test -e "$tmpdir/codex-repair-google-signin-redirect/.git"
 
+llama_repo="$tmpdir/llama"
+make_repo "$llama_repo"
+fake_llama_model="$tmpdir/fake-qwen.gguf"
+fake_llama="$tmpdir/fake-llama-cli"
+fake_ollama_cmd="$tmpdir/ollama"
+printf 'fake model\n' > "$fake_llama_model"
+cat > "$fake_ollama_cmd" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "\$*" == "show --modelfile fake:qwen" ]]; then
+  printf 'FROM %s\n' "$fake_llama_model"
+else
+  exit 1
+fi
+EOF
+chmod +x "$fake_ollama_cmd"
+cat > "$fake_llama" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'Loading model...\n'
+printf '> Create a git branch/worktree slug for this task.\n'
+printf 'Return only the slug.\n'
+printf '%s\n' "${FAKE_LLAMA_OUTPUT:-repair-google-signin-redirect}"
+printf '[ Prompt: 1.0 t/s | Generation: 1.0 t/s ]\n'
+printf 'Exiting...\n'
+EOF
+chmod +x "$fake_llama"
+
+llama_output="$(
+  cd "$llama_repo"
+  PATH="$tmpdir:$PATH" CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=llama CODEX_WORKTREE_LLAMA_BIN="$fake_llama" CODEX_WORKTREE_LLAMA_MODEL=fake:qwen "$repo_root/bin/codex-worktree" 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
+)"
+
+assert_contains "$llama_output" "llama-repair-google-signin-redirect"
+assert_contains "$llama_output" "jesse/repair-google-signin-redirect"
+test -e "$tmpdir/llama-repair-google-signin-redirect/.git"
+
+llama_fallback_repo="$tmpdir/llama-fallback"
+make_repo "$llama_fallback_repo"
+
+llama_fallback_output="$(
+  cd "$llama_fallback_repo"
+  PATH="$tmpdir:$PATH" CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=llama CODEX_WORKTREE_LLAMA_BIN="$fake_llama" CODEX_WORKTREE_LLAMA_MODEL=fake:qwen FAKE_LLAMA_OUTPUT=git-keep "$repo_root/bin/codex-worktree" 'ok remove all the worktree cleanup shit and make current worktree names less scuffed' 2>&1
+)"
+
+assert_contains "$llama_fallback_output" "llama-fallback-remove-all-worktree-cleanup"
+assert_contains "$llama_fallback_output" "jesse/remove-all-worktree-cleanup"
+test -e "$tmpdir/llama-fallback-remove-all-worktree-cleanup/.git"
+
 override_repo="$tmpdir/override"
 make_repo "$override_repo"
 

@@ -114,6 +114,14 @@ The wrapper calls Ollama's local HTTP API with `smollm2:360m`, validates the ret
 
 Ollama naming is opt-in because warm calls are fast, but cold model starts can add several seconds.
 
+For smarter names without a warm Ollama model, the wrapper can run `llama-cli` directly against a local GGUF model:
+
+```sh
+CODEX_WORKTREE_NAMER=llama codex "Fix login redirect"
+```
+
+By default this resolves Ollama's `qwen2.5:0.5b-instruct` model file with `ollama show --modelfile`, then runs `llama-cli` directly. This avoids keeping an Ollama model warm, but still adds about 1 to 2 seconds on this machine.
+
 The local fallback lowercases text, removes filler words like `please`, `you`, `the`, and `when`, keeps the first few meaningful words, and caps the result:
 
 ```text
@@ -131,6 +139,12 @@ Use Ollama naming:
 
 ```sh
 CODEX_WORKTREE_NAMER=ollama codex "Fix login redirect"
+```
+
+Use direct llama.cpp naming:
+
+```sh
+CODEX_WORKTREE_NAMER=llama codex "Fix login redirect"
 ```
 
 Use Codex naming:
@@ -165,6 +179,14 @@ Override the Ollama model or timeout:
 
 ```sh
 CODEX_WORKTREE_OLLAMA_MODEL=smollm2:360m CODEX_WORKTREE_OLLAMA_TIMEOUT=4 codex "Fix login redirect"
+```
+
+Override the direct llama.cpp model, model path, binary, or timeout:
+
+```sh
+CODEX_WORKTREE_LLAMA_MODEL=qwen2.5:0.5b-instruct CODEX_WORKTREE_LLAMA_TIMEOUT=4 codex "Fix login redirect"
+CODEX_WORKTREE_LLAMA_MODEL_PATH=/path/to/model.gguf codex "Fix login redirect"
+CODEX_WORKTREE_LLAMA_BIN=/opt/homebrew/bin/llama-cli codex "Fix login redirect"
 ```
 
 Override the Codex naming model or timeout:
