@@ -99,6 +99,7 @@ interactive_output="$(
 log_user 1
 spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/codex-worktree"
 expect "Describe the task"
+expect "› "
 send "Fix Login Redirect\r"
 expect "Clean up worktree"
 send "n\r"
