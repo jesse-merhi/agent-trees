@@ -1,7 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CODEX_BIN="${CODEX_BIN:-/opt/homebrew/bin/codex}"
+resolve_codex_bin() {
+  local candidate
+
+  while IFS= read -r candidate; do
+    if [[ ! "$candidate" -ef "${BASH_SOURCE[0]}" ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done < <(type -ap codex)
+}
+
+CODEX_BIN="${CODEX_BIN:-$(resolve_codex_bin)}"
+
+if [[ -z "$CODEX_BIN" ]]; then
+  printf 'codex-worktree: codex not found in PATH; set CODEX_BIN\n' >&2
+  exit 1
+fi
 
 value_options=(
   -a --ask-for-approval
@@ -314,6 +330,22 @@ default_base_branch() {
   printf '%s\n' "${current_branch:-main}"
 }
 
+default_branch_prefix() {
+  local git_user_name
+  local prefix=""
+
+  git_user_name="$(git -C "$repo_root" config user.name 2>/dev/null || true)"
+  if [[ -n "$git_user_name" ]]; then
+    prefix="$(slugify "${git_user_name%% *}")"
+  fi
+
+  if [[ -z "$prefix" && -n "${USER:-}" ]]; then
+    prefix="$(slugify "$USER")"
+  fi
+
+  printf '%s\n' "${prefix:-codex}"
+}
+
 first_arg="${1:-}"
 
 for arg in "$@"; do
@@ -380,8 +412,13 @@ if [[ -z "$base_branch" ]]; then
 fi
 base_branch="${base_branch:-main}"
 
+branch_prefix="${CODEX_WORKTREE_BRANCH_PREFIX:-}"
+if [[ -z "$branch_prefix" ]]; then
+  branch_prefix="$(default_branch_prefix)"
+fi
+
 worktree_dir="${CODEX_WORKTREE_DIR:-$parent_dir/$repo_name-$slug}"
-branch_name="${CODEX_WORKTREE_BRANCH:-jesse/$slug}"
+branch_name="${CODEX_WORKTREE_BRANCH:-$branch_prefix/$slug}"
 
 if [[ ! -e "$worktree_dir/.git" ]]; then
   if [[ -e "$worktree_dir" ]]; then

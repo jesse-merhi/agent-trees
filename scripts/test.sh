@@ -33,6 +33,10 @@ assert_contains() {
   fi
 }
 
+strip_ansi() {
+  sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g'
+}
+
 assert_not_contains() {
   local haystack="$1"
   local needle="$2"
@@ -83,7 +87,7 @@ output="$(
 )"
 
 assert_contains "$output" "demo-fix-login-redirect"
-assert_contains "$output" "jesse/fix-login-redirect"
+assert_contains "$output" "test/fix-login-redirect"
 assert_contains "$output" "-C "
 test -e "$tmpdir/demo-fix-login-redirect/.git"
 
@@ -101,12 +105,14 @@ expect eof
 EOF
 )"
 
-assert_not_contains "$interactive_output" "Worktree task"
-assert_not_contains "$interactive_output" "------------------------------------------------------------------------"
-assert_contains "$interactive_output" "  >  Describe the task"
-assert_contains "$interactive_output" "Enter = stay here"
-assert_contains "$interactive_output" "interactive-fix-login-redirect"
-assert_contains "$interactive_output" "jesse/fix-login-redirect"
+interactive_plain="$(printf '%s' "$interactive_output" | strip_ansi)"
+
+assert_not_contains "$interactive_plain" "Worktree task"
+assert_not_contains "$interactive_plain" "------------------------------------------------------------------------"
+assert_contains "$interactive_plain" "  >  Describe the task"
+assert_contains "$interactive_plain" "Enter = stay here"
+assert_contains "$interactive_plain" "interactive-fix-login-redirect"
+assert_contains "$interactive_plain" "test/fix-login-redirect"
 test -e "$tmpdir/interactive-fix-login-redirect/.git"
 
 assert_rejects_namer ollama
@@ -144,7 +150,7 @@ codex_output="$(
 )"
 
 assert_contains "$codex_output" "codex-repair-google-signin-redirect"
-assert_contains "$codex_output" "jesse/repair-google-signin-redirect"
+assert_contains "$codex_output" "test/repair-google-signin-redirect"
 test -e "$tmpdir/codex-repair-google-signin-redirect/.git"
 
 override_repo="$tmpdir/override"
@@ -156,7 +162,18 @@ override_output="$(
 )"
 
 assert_contains "$override_output" "override-raw-custom-name"
-assert_contains "$override_output" "jesse/raw-custom-name"
+assert_contains "$override_output" "test/raw-custom-name"
+
+prefix_repo="$tmpdir/prefix"
+make_repo "$prefix_repo"
+
+prefix_output="$(
+  cd "$prefix_repo"
+  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local CODEX_WORKTREE_BRANCH_PREFIX=alice "$repo_root/bin/codex-worktree" 'Fix Login Redirect' 2>&1
+)"
+
+assert_contains "$prefix_output" "prefix-fix-login-redirect"
+assert_contains "$prefix_output" "alice/fix-login-redirect"
 
 if find "$tmpdir" -type f -name worktrees.tsv | grep -q .; then
   printf 'Wrapper should not create a worktree state file.\n' >&2
@@ -191,7 +208,7 @@ option_output="$(
 )"
 
 assert_contains "$option_output" "options-find-regressions"
-assert_contains "$option_output" "jesse/find-regressions"
+assert_contains "$option_output" "test/find-regressions"
 
 cleanup_passthrough="$(
   cd "$repo"

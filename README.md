@@ -20,25 +20,35 @@ Type the task:
 Can you please fix the broken login redirect when users sign in from Google?
 ```
 
-It creates:
+It creates a worktree and branch:
 
 ```text
 ../repo-fix-broken-login-redirect
 jesse/fix-broken-login-redirect
 ```
 
-Then it launches:
+The branch prefix (`jesse` here) is the first word of your Git `user.name`, lowercased. Override it with `CODEX_WORKTREE_BRANCH_PREFIX`.
+
+Then it launches the real Codex binary in the new worktree:
 
 ```sh
-/opt/homebrew/bin/codex -C ../repo-fix-broken-login-redirect "Can you please fix the broken login redirect when users sign in from Google?"
+codex -C ../repo-fix-broken-login-redirect "Can you please fix the broken login redirect when users sign in from Google?"
 ```
 
 Press Enter on a blank prompt to run Codex in the current checkout without creating a worktree.
 
+## Requirements
+
+- macOS or Linux with Bash 3.2+
+- Git 2.5+ (the first version with `git worktree`)
+- The Codex CLI somewhere on your `PATH`
+- `python3`, only if you opt into Codex naming with `CODEX_WORKTREE_NAMER=codex`
+- `expect`, only for running the test suite
+
 ## Install
 
 ```sh
-git clone git@github.com:jesse-merhi/worktree-launcher.git ~/repos/worktree-launcher
+git clone https://github.com/jesse-merhi/worktree-launcher.git ~/repos/worktree-launcher
 cd ~/repos/worktree-launcher
 ./scripts/install.sh
 ```
@@ -127,10 +137,16 @@ Codex naming is opt-in because starting a second Codex agent just to name a work
 
 ## Settings
 
-Use a custom Codex binary:
+Use a custom Codex binary (the default is the first `codex` found on `PATH`):
 
 ```sh
 CODEX_BIN=/path/to/codex codex
+```
+
+Override the branch prefix (the default is the first word of your Git `user.name`, falling back to `$USER`, then `codex`):
+
+```sh
+CODEX_WORKTREE_BRANCH_PREFIX=alice codex "Fix login redirect"
 ```
 
 Override the generated slug:
@@ -151,10 +167,10 @@ Override the base branch:
 CODEX_WORKTREE_BASE=develop codex "Fix login redirect"
 ```
 
-Override the worktree directory or branch:
+Override the worktree directory or the full branch name:
 
 ```sh
-CODEX_WORKTREE_DIR=../custom-dir CODEX_WORKTREE_BRANCH=jesse/custom codex "Fix login redirect"
+CODEX_WORKTREE_DIR=../custom-dir CODEX_WORKTREE_BRANCH=alice/custom codex "Fix login redirect"
 ```
 
 Fetch before creating the worktree:
@@ -178,3 +194,5 @@ The tests use `CODEX_BIN=/bin/echo`, temp repos, and temp home directories. They
 This is intentionally small. It is a launcher, not a session manager.
 
 It cannot change the working directory of a running Codex TUI session. It creates the worktree first, then starts the real CLI with `-C`.
+
+`AGENTS.md` covers repo layout and conventions. `docs/prior-art.md` covers why this exists.
