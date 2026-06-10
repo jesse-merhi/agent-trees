@@ -6,8 +6,9 @@ Orientation for AI agents and new contributors.
 
 One Bash script that wraps the Codex CLI. When you run `codex` with a task
 prompt from the primary checkout of a Git repo, it creates a task-specific
-Git worktree and branch, then execs the real Codex binary with
-`-C <worktree>`. Everything else passes through untouched.
+Git worktree and branch, then runs the real Codex binary with
+`-C <worktree>`. When the session ends it offers to remove the worktree.
+Everything else passes through untouched via `exec`.
 
 ## Layout
 
@@ -45,3 +46,6 @@ test.
   cleanup daemons, or worktree tracking. Cleanup is an exit-time prompt
   that runs native `git worktree remove` and nothing more (see
   `docs/prior-art.md`).
+- The interactive prompts deliberately mimic the Codex TUI: a grey
+  `48;5;236` band, a dim `›` caret on the band edge, and text starting at
+  column 3. Compare against a real Codex session before restyling them.

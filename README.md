@@ -1,42 +1,40 @@
 # Worktree Launcher
 
-Small shell wrapper for starting Codex CLI sessions in task-specific Git worktrees.
+A small Bash wrapper that gives every Codex CLI task its own Git worktree and branch, without changing the command you type.
 
-The normal flow stays simple:
+You still run:
 
 ```sh
 codex
 ```
 
-If you are in the primary checkout of a Git repo, the wrapper asks:
+From the primary checkout of a repo, the wrapper asks for the task first:
 
 ```text
-Describe the task
-›
+  Describe the task
+› fix the broken login redirect when users sign in from Google
 ```
 
-Type the task:
+It turns the task into a worktree and branch, then starts the real Codex CLI inside it:
 
 ```text
-Can you please fix the broken login redirect when users sign in from Google?
+codex-worktree: ~/repos/app-fix-broken-login-redirect on jesse/fix-broken-login-redirect
 ```
 
-It creates a worktree and branch:
+When the session ends, it offers to clean up after itself:
 
 ```text
-../repo-fix-broken-login-redirect
-jesse/fix-broken-login-redirect
+› Clean up worktree ~/repos/app-fix-broken-login-redirect? [y/N] y
+codex-worktree: removing ~/repos/app-fix-broken-login-redirect ...
+codex-worktree: removed ~/repos/app-fix-broken-login-redirect
+codex-worktree: deleted branch jesse/fix-broken-login-redirect
 ```
 
-The branch prefix (`jesse` here) is the first word of your Git `user.name`, lowercased. Override it with `CODEX_WORKTREE_BRANCH_PREFIX`.
+Each task gets an isolated checkout, so parallel Codex sessions never trip over each other and your main checkout stays clean. Press Enter on a blank prompt to run Codex in the current checkout instead.
 
-Then it launches the real Codex binary in the new worktree:
+## Why
 
-```sh
-codex -C ../repo-fix-broken-login-redirect "Can you please fix the broken login redirect when users sign in from Google?"
-```
-
-Press Enter on a blank prompt to run Codex in the current checkout without creating a worktree.
+Running coding agents in Git worktrees is the standard way to isolate parallel work, but the Codex CLI has no built-in flow for it on local checkouts. This wrapper adds the missing steps — create the worktree, start Codex inside it, offer to remove it afterwards — and nothing else. [docs/prior-art.md](docs/prior-art.md) covers the background.
 
 ## Requirements
 
@@ -79,145 +77,107 @@ cd ~/repos/worktree-launcher
 ./scripts/uninstall.sh
 ```
 
-The uninstaller removes the installed wrapper and the managed shell block.
+The uninstaller removes the installed wrapper and the managed shell block. If you wrote your own `codex` alias by hand, it is left alone and a warning is printed.
 
-If you already had a hand-written alias, the uninstaller leaves it alone and prints a warning.
+## When it stays out of the way
 
-## Behavior
+The wrapper only steps in for a fresh Codex session started from the primary checkout of a Git repo. Everything else goes straight to the real binary:
 
-The wrapper passes these through to the real Codex binary without creating worktrees:
+- subcommands that manage Codex itself: `resume`, `fork`, `doctor`, `cloud`, `app`, `update`, `cleanup`, `worktrees`, `login`, `mcp`, and friends
+- explicit directory flags: `codex -C ...` and `codex --cd ...`
+- `--help` and `--version`
+- outside a Git repo
+- already inside a linked worktree
+- no task given: a blank interactive prompt, or a non-interactive shell with no arguments
 
-```text
-codex -C ...
-codex --cd ...
-codex --help
-codex --version
-codex resume
-codex fork
-codex doctor
-codex cloud
-codex app
-codex update
-codex cleanup
-codex worktrees
-```
+## Branches and naming
 
-It also passes through when:
+The worktree is created next to your repo and the branch is `<prefix>/<slug>`:
 
 ```text
-you are outside a Git repo
-you are already inside a linked worktree
-no prompt was provided in a non-interactive shell
-the interactive prompt is blank
+~/repos/app                          your checkout
+~/repos/app-fix-broken-login-redirect    the task worktree
+jesse/fix-broken-login-redirect          its branch
 ```
 
-## Cleanup
+The prefix is the first word of your Git `user.name`, lowercased, falling back to `$USER`, then `codex`.
 
-When the Codex session ends, the wrapper asks:
-
-```text
-› Clean up worktree ~/repos/repo-fix-broken-login-redirect? [y/N]
-```
-
-Answering `y` removes the worktree with `git worktree remove` and deletes the branch when everything on it is already on the base branch. Saying yes cannot lose work: Git refuses to remove a worktree with uncommitted or untracked files, and a branch with its own commits is kept, along with the `git branch -D` command to delete it deliberately.
-
-The default is no. Saying no keeps the worktree and prints the command for later:
-
-```sh
-git -C /path/to/repo worktree remove /path/to/repo-fix-broken-login-redirect
-```
-
-Skip the prompt entirely:
-
-```sh
-CODEX_WORKTREE_CLEANUP_PROMPT=0 codex "Fix login redirect"
-```
-
-The prompt also never appears in non-interactive shells.
-
-## Naming
-
-By default, the wrapper uses fast local deterministic naming.
-
-The local fallback lowercases text, removes filler words like `please`, `you`, `the`, and `when`, keeps the first few meaningful words, and caps the result:
+The slug comes from the task text. The default namer is local and instant: lowercase, drop filler words like `please`, `you`, `the`, and `when`, keep the first few meaningful words:
 
 ```text
 Can you please fix the broken login redirect when users sign in from Google?
 -> fix-broken-login-redirect
 ```
 
-Use local fallback naming only:
-
-```sh
-CODEX_WORKTREE_NAMER=local codex "Fix login redirect"
-```
-
-Use Codex naming:
+You can ask Codex to name the branch instead:
 
 ```sh
 CODEX_WORKTREE_NAMER=codex codex "Fix login redirect"
 ```
 
-Codex naming is opt-in because starting a second Codex agent just to name a worktree is noticeably slower.
+That is opt-in because starting a second Codex agent just to name a worktree is noticeably slower. If it fails or times out, the local namer takes over.
 
-## Settings
+New worktrees branch from the repo's default branch (`origin/HEAD`, falling back to `main`, then `master`). If the branch already exists, locally or on the remote, it is checked out instead of recreated.
 
-Use a custom Codex binary (the default is the first `codex` found on `PATH`):
+## Cleanup
 
-```sh
-CODEX_BIN=/path/to/codex codex
+When the Codex session ends, the wrapper asks:
+
+```text
+› Clean up worktree ~/repos/app-fix-broken-login-redirect? [y/N]
 ```
 
-Override the branch prefix (the default is the first word of your Git `user.name`, falling back to `$USER`, then `codex`):
+Answering `y` removes the worktree with `git worktree remove` and deletes the branch when everything on it is already on the base branch.
 
-```sh
-CODEX_WORKTREE_BRANCH_PREFIX=alice codex "Fix login redirect"
-```
+Saying yes cannot lose work:
 
-Override the generated slug:
+- Git refuses to remove a worktree with uncommitted or untracked files.
+- A branch with its own commits is kept, and the exact `git branch -D` command to delete it deliberately is printed.
+
+The default is no. Saying no keeps the worktree and prints the removal command for later. The prompt never appears in non-interactive shells, and `CODEX_WORKTREE_CLEANUP_PROMPT=0` disables it entirely.
+
+There is no state file and no tracking: cleanup is a thin prompt over native `git worktree` commands.
+
+## Configuration
+
+Everything is an environment variable, so one-off overrides are just a prefix on the command.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `CODEX_BIN` | first `codex` on `PATH` | Codex binary to launch |
+| `CODEX_WORKTREE_NAMER` | `local` | `codex` asks Codex to name the branch |
+| `CODEX_WORKTREE_NAMER_MODEL` | `gpt-5.1-codex` | Model used for Codex naming |
+| `CODEX_WORKTREE_NAMER_TIMEOUT` | `8` | Seconds before Codex naming falls back to local |
+| `CODEX_WORKTREE_SLUG` | derived from the task | Slug used in worktree and branch names |
+| `CODEX_WORKTREE_BRANCH_PREFIX` | first word of Git `user.name` | Branch prefix in `<prefix>/<slug>` |
+| `CODEX_WORKTREE_BRANCH` | `<prefix>/<slug>` | Full branch name |
+| `CODEX_WORKTREE_DIR` | `../<repo>-<slug>` | Worktree path |
+| `CODEX_WORKTREE_BASE` | repo default branch | Base branch for new worktrees |
+| `CODEX_WORKTREE_FETCH` | `0` | `1` fetches the base branch before creating the worktree |
+| `CODEX_WORKTREE_CLEANUP_PROMPT` | `1` | `0` skips the exit-time cleanup prompt |
+
+Examples:
 
 ```sh
 CODEX_WORKTREE_SLUG=login-redirect codex "Fix login redirect"
-```
-
-Override the Codex naming model or timeout:
-
-```sh
-CODEX_WORKTREE_NAMER_MODEL=gpt-5.1-codex CODEX_WORKTREE_NAMER_TIMEOUT=4 codex "Fix login redirect"
-```
-
-Override the base branch:
-
-```sh
 CODEX_WORKTREE_BASE=develop codex "Fix login redirect"
-```
-
-Override the worktree directory or the full branch name:
-
-```sh
-CODEX_WORKTREE_DIR=../custom-dir CODEX_WORKTREE_BRANCH=alice/custom codex "Fix login redirect"
-```
-
-Fetch before creating the worktree:
-
-```sh
-CODEX_WORKTREE_FETCH=1 codex "Fix login redirect"
+CODEX_WORKTREE_BRANCH_PREFIX=alice codex "Fix login redirect"
 ```
 
 Fetch is off by default so the wrapper stays fast.
 
-## Test
+## Development
 
 ```sh
 ./scripts/test.sh
 ```
 
-The tests use `CODEX_BIN=/bin/echo`, temp repos, and temp home directories. They do not launch a real Codex session.
+The tests syntax-check every script, then drive real worktree creation and the interactive prompts end to end in temp repos with temp home directories. `CODEX_BIN` points at `/bin/echo` or a small fake, so no real Codex session ever starts and your `~/.zshrc` is never touched.
 
-## Notes
+[AGENTS.md](AGENTS.md) covers repo layout and the conventions for changes.
+
+## Design notes
 
 This is intentionally small. It is a launcher, not a session manager.
 
 It cannot change the working directory of a running Codex TUI session. It creates the worktree first, then starts the real CLI with `-C`.
-
-`AGENTS.md` covers repo layout and conventions. `docs/prior-art.md` covers why this exists.
