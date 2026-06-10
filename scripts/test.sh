@@ -469,4 +469,14 @@ fresh_zshrc="$(cat "$fresh_home/.zshrc")"
 assert_contains "$fresh_zshrc" "alias codex='agent-trees codex'"
 assert_contains "$fresh_zshrc" "alias claude='agent-trees claude'"
 
+# Piped install (curl ... | bash): no script file on disk, binary fetched
+# from the raw URL. file:// keeps the test offline.
+pipe_home="$tmpdir/pipehome"
+mkdir -p "$pipe_home"
+HOME="$pipe_home" AGENT_TREES_RAW_BASE="file://$repo_root" \
+  bash < "$repo_root/scripts/install.sh" >/dev/null
+test -x "$pipe_home/.local/bin/agent-trees"
+diff -q "$repo_root/bin/agent-trees" "$pipe_home/.local/bin/agent-trees" >/dev/null
+grep -Fq "# >>> agent-trees >>>" "$pipe_home/.zshrc"
+
 printf 'All tests passed.\n'

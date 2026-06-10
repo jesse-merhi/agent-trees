@@ -1,13 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# Works from a clone (./scripts/install.sh) and piped from the web
+# (curl ... | bash). AGENT_TREES_RAW_BASE exists so the tests can point
+# the piped path at a local file:// URL.
+raw_base="${AGENT_TREES_RAW_BASE:-https://raw.githubusercontent.com/jesse-merhi/agent-trees/main}"
 bin_dir="${AGENT_TREES_BIN_DIR:-$HOME/.local/bin}"
 shell_rc="${AGENT_TREES_SHELL_RC:-$HOME/.zshrc}"
 target="$bin_dir/agent-trees"
 
+script_source="${BASH_SOURCE[0]:-}"
+local_binary=""
+if [[ -n "$script_source" && -f "$script_source" ]]; then
+  local_binary="$(cd "$(dirname "$script_source")/.." && pwd -P)/bin/agent-trees"
+fi
+
 mkdir -p "$bin_dir"
-install -m 0755 "$repo_root/bin/agent-trees" "$target"
+
+if [[ -n "$local_binary" && -f "$local_binary" ]]; then
+  install -m 0755 "$local_binary" "$target"
+else
+  tmp_file="$(mktemp)"
+  if ! curl -fsSL "$raw_base/bin/agent-trees" -o "$tmp_file"; then
+    printf 'agent-trees: download failed: %s\n' "$raw_base/bin/agent-trees" >&2
+    rm -f "$tmp_file"
+    exit 1
+  fi
+  if ! head -n 1 "$tmp_file" | grep -q '^#!'; then
+    printf 'agent-trees: %s/bin/agent-trees does not look like a script; aborting\n' "$raw_base" >&2
+    rm -f "$tmp_file"
+    exit 1
+  fi
+  install -m 0755 "$tmp_file" "$target"
+  rm -f "$tmp_file"
+fi
 
 for obsolete in "$bin_dir/codex-worktree" "$bin_dir/codex-worktree-cleanup" "$bin_dir/sidegrove"; do
   if [[ -e "$obsolete" ]]; then

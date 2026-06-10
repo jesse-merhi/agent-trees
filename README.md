@@ -24,20 +24,22 @@ Doing this by hand means naming a branch, creating the worktree, starting the ag
 ## Install
 
 ```sh
-git clone https://github.com/jesse-merhi/agent-trees.git ~/repos/agent-trees
-cd ~/repos/agent-trees
-./scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/jesse-merhi/agent-trees/main/scripts/install.sh | bash
 source ~/.zshrc
 ```
 
-This installs one binary, `~/.local/bin/agent-trees`, and adds a managed alias block to `~/.zshrc`:
+From a clone, `./scripts/install.sh` does the same thing. Either way it installs one binary, `~/.local/bin/agent-trees`, and adds a managed alias block to `~/.zshrc`:
 
 ```sh
 alias codex='agent-trees codex'
 alias claude='agent-trees claude'
 ```
 
-Each alias is guarded by a `command -v` check, aliases you wrote yourself are left alone, and old `worktree-launcher` or `sidegrove` installs migrate automatically. `./scripts/uninstall.sh` removes everything.
+Each alias is guarded by a `command -v` check, aliases you wrote yourself are left alone, and old `worktree-launcher` or `sidegrove` installs migrate automatically. Uninstalling works the same way, piped or from a clone:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jesse-merhi/agent-trees/main/scripts/uninstall.sh | bash
+```
 
 Any other CLI works with safe generic defaults:
 
