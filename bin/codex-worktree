@@ -304,6 +304,37 @@ read_worktree_prompt() {
   fi
 }
 
+cleanup_command() {
+  printf 'git -C %q worktree remove %q' "$repo_root" "$worktree_dir"
+}
+
+offer_worktree_cleanup() {
+  local answer
+
+  [[ -e "$worktree_dir/.git" ]] || return 0
+
+  printf '\n  >  Clean up worktree %s? [y/N] ' "$worktree_dir" >&2
+  IFS= read -r answer || answer=""
+
+  case "$answer" in
+    y|Y|yes|Yes|YES)
+      if git -C "$repo_root" worktree remove "$worktree_dir"; then
+        printf 'codex-worktree: removed %s\n' "$worktree_dir" >&2
+        if git -C "$repo_root" branch -d "$branch_name" >/dev/null 2>&1; then
+          printf 'codex-worktree: deleted branch %s\n' "$branch_name" >&2
+        else
+          printf 'codex-worktree: kept branch %s (unmerged or in use)\n' "$branch_name" >&2
+        fi
+      else
+        printf 'codex-worktree: not removed; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
+      fi
+      ;;
+    *)
+      printf 'codex-worktree: keeping worktree; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
+      ;;
+  esac
+}
+
 default_base_branch() {
   local origin_head
   local current_branch
@@ -445,4 +476,13 @@ fi
 printf 'codex-worktree: %s\n' "$worktree_dir" >&2
 printf 'codex-worktree: %s\n' "$branch_name" >&2
 
-exec "$CODEX_BIN" -C "$worktree_dir" "$@"
+if [[ "${CODEX_WORKTREE_CLEANUP_PROMPT:-1}" != "1" || ! -t 0 || ! -t 1 ]]; then
+  exec "$CODEX_BIN" -C "$worktree_dir" "$@"
+fi
+
+codex_status=0
+"$CODEX_BIN" -C "$worktree_dir" "$@" || codex_status=$?
+
+offer_worktree_cleanup
+
+exit "$codex_status"

@@ -110,6 +110,30 @@ no prompt was provided in a non-interactive shell
 the interactive prompt is blank
 ```
 
+## Cleanup
+
+When the Codex session ends, the wrapper asks:
+
+```text
+  >  Clean up worktree ../repo-fix-broken-login-redirect? [y/N]
+```
+
+Answering `y` removes the worktree with `git worktree remove` and deletes the branch if it is fully merged. Git refuses to remove a worktree with uncommitted or untracked files, so saying yes cannot lose work.
+
+The default is no. Saying no keeps the worktree and prints the command for later:
+
+```sh
+git -C /path/to/repo worktree remove /path/to/repo-fix-broken-login-redirect
+```
+
+Skip the prompt entirely:
+
+```sh
+CODEX_WORKTREE_CLEANUP_PROMPT=0 codex "Fix login redirect"
+```
+
+The prompt also never appears in non-interactive shells.
+
 ## Naming
 
 By default, the wrapper uses fast local deterministic naming.

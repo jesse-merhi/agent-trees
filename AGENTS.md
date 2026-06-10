@@ -42,5 +42,6 @@ test.
 - User-facing configuration is environment variables prefixed
   `CODEX_WORKTREE_`. Document new ones in `README.md`.
 - This is a launcher, not a session manager. Do not add state files,
-  cleanup daemons, or worktree tracking. Cleanup belongs to native
-  `git worktree` commands (see `docs/prior-art.md`).
+  cleanup daemons, or worktree tracking. Cleanup is an exit-time prompt
+  that runs native `git worktree remove` and nothing more (see
+  `docs/prior-art.md`).

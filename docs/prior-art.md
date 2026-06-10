@@ -10,7 +10,7 @@ git worktree remove <path>
 git worktree prune
 ```
 
-`git worktree prune` cleans stale Git metadata for worktrees whose directories are already gone. This wrapper does not add a cleanup layer; cleanup stays with native Git commands.
+`git worktree prune` cleans stale Git metadata for worktrees whose directories are already gone. This wrapper does not add a cleanup layer of its own; its exit-time prompt just runs `git worktree remove`, with no extra state or tracking.
 
 ## What others are doing
 

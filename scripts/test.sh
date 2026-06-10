@@ -101,6 +101,8 @@ log_user 1
 spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/codex-worktree"
 expect "Describe the task"
 send "Fix Login Redirect\r"
+expect "Clean up worktree"
+send "n\r"
 expect eof
 EOF
 )"
@@ -113,7 +115,44 @@ assert_contains "$interactive_plain" "  >  Describe the task"
 assert_not_contains "$interactive_plain" "Enter = stay here"
 assert_contains "$interactive_plain" "interactive-fix-login-redirect"
 assert_contains "$interactive_plain" "test/fix-login-redirect"
+assert_contains "$interactive_plain" "clean up later with"
+assert_contains "$interactive_plain" "worktree remove"
 test -e "$tmpdir/interactive-fix-login-redirect/.git"
+
+cleanup_yes_repo="$tmpdir/cleanyes"
+make_repo "$cleanup_yes_repo"
+
+cleanup_yes_output="$(
+  cd "$cleanup_yes_repo"
+  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local expect <<EOF
+log_user 1
+spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/codex-worktree" "Fix Login Redirect"
+expect "Clean up worktree"
+send "y\r"
+expect eof
+EOF
+)"
+
+cleanup_yes_plain="$(printf '%s' "$cleanup_yes_output" | strip_ansi)"
+
+assert_contains "$cleanup_yes_plain" "removed $tmpdir/cleanyes-fix-login-redirect"
+assert_contains "$cleanup_yes_plain" "deleted branch test/fix-login-redirect"
+test ! -e "$tmpdir/cleanyes-fix-login-redirect"
+
+cleanup_off_repo="$tmpdir/cleanoff"
+make_repo "$cleanup_off_repo"
+
+cleanup_off_output="$(
+  cd "$cleanup_off_repo"
+  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local expect <<EOF
+log_user 1
+spawn env TERM=xterm-256color COLUMNS=72 CODEX_WORKTREE_CLEANUP_PROMPT=0 "$repo_root/bin/codex-worktree" "Fix Login Redirect"
+expect eof
+EOF
+)"
+
+assert_not_contains "$cleanup_off_output" "Clean up worktree"
+test -e "$tmpdir/cleanoff-fix-login-redirect/.git"
 
 assert_rejects_namer ollama
 assert_rejects_namer llama
