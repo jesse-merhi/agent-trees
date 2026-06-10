@@ -366,6 +366,7 @@ offer_worktree_cleanup() {
 
   case "$answer" in
     y|Y|yes|Yes|YES)
+      printf 'codex-worktree: removing %s ...\n' "$(display_path "$worktree_dir")" >&2
       if git -C "$repo_root" worktree remove "$worktree_dir"; then
         printf 'codex-worktree: removed %s\n' "$(display_path "$worktree_dir")" >&2
         if branch_is_merged_into_base &&

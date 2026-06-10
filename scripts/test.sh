@@ -137,6 +137,7 @@ EOF
 
 cleanup_yes_plain="$(printf '%s' "$cleanup_yes_output" | strip_ansi)"
 
+assert_contains "$cleanup_yes_plain" "removing $tmpdir/cleanyes-fix-login-redirect ..."
 assert_contains "$cleanup_yes_plain" "removed $tmpdir/cleanyes-fix-login-redirect"
 assert_contains "$cleanup_yes_plain" "deleted branch test/fix-login-redirect"
 test ! -e "$tmpdir/cleanyes-fix-login-redirect"
