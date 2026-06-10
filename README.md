@@ -11,7 +11,8 @@ codex
 If you are in the primary checkout of a Git repo, the wrapper asks:
 
 ```text
-  >  Describe the task
+Describe the task
+›
 ```
 
 Type the task:
@@ -115,7 +116,7 @@ the interactive prompt is blank
 When the Codex session ends, the wrapper asks:
 
 ```text
-  >  Clean up worktree ~/repos/repo-fix-broken-login-redirect? [y/N]
+› Clean up worktree ~/repos/repo-fix-broken-login-redirect? [y/N]
 ```
 
 Answering `y` removes the worktree with `git worktree remove` and deletes the branch when everything on it is already on the base branch. Saying yes cannot lose work: Git refuses to remove a worktree with uncommitted or untracked files, and a branch with its own commits is kept, along with the `git branch -D` command to delete it deliberately.
