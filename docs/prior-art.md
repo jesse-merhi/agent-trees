@@ -35,21 +35,18 @@ Examples found during search:
 - Reddit discussions include people wrapping small CLI harnesses around Codex for worktree management:
   `https://www.reddit.com/r/codex/comments/1sc7g2x/how_are_you_actually_running_codex_at_scale/`
 
-The Codex app also has built-in worktree support. The local CLI path is the gap this wrapper targets.
+The Codex app has built-in worktree support, and Claude Code has a basic `-w/--worktree` flag. The gap this wrapper targets is the full local flow, uniform across CLIs: a branch and worktree named after the task, the agent started inside it, and an exit-time cleanup offer.
 
 ## Difference here
 
-This wrapper keeps the command you already type:
+This wrapper keeps the commands you already type:
 
 ```sh
 codex
+claude
 ```
 
-It asks for a first task prompt, turns that into a branch and worktree name, then launches the real CLI with:
-
-```sh
-codex -C <worktree>
-```
+It asks for a first task prompt, turns that into a branch and worktree name, then launches the real CLI inside the new worktree.
 
 It avoids automatic anonymous `scratch-*` directories. Blank input means:
 

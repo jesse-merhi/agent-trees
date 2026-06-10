@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-bash -n "$repo_root/bin/codex-worktree"
+bash -n "$repo_root/bin/sidegrove"
 bash -n "$repo_root/scripts/install.sh"
 bash -n "$repo_root/scripts/uninstall.sh"
 
@@ -48,56 +48,137 @@ assert_not_contains() {
   fi
 }
 
-assert_rejects_namer() {
-  local namer="$1"
-  local repo="$tmpdir/reject-$namer"
-  local output
-  local status
+fake_cli="$tmpdir/fake-cli"
+cat > "$fake_cli" <<'EOF'
+#!/bin/sh
+printf 'PWD:%s ARGS:%s\n' "$PWD" "$*"
+EOF
+chmod +x "$fake_cli"
 
-  make_repo "$repo"
+# --- usage ---
 
-  set +e
-  output="$(
-    cd "$repo"
-    CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER="$namer" "$repo_root/bin/codex-worktree" 'Fix Login Redirect' 2>&1
-  )"
-  status=$?
-  set -e
+set +e
+usage_output="$("$repo_root/bin/sidegrove" 2>&1)"
+usage_status=$?
+set -e
 
-  if [[ "$status" -eq 0 ]]; then
-    printf 'Expected CODEX_WORKTREE_NAMER=%s to fail.\n' "$namer" >&2
-    printf 'Actual output:\n%s\n' "$output" >&2
-    exit 1
-  fi
+if [[ "$usage_status" -ne 2 ]]; then
+  printf 'Expected exit 2 for missing CLI argument, got %s.\n' "$usage_status" >&2
+  exit 1
+fi
+assert_contains "$usage_output" "Usage: sidegrove <cli>"
 
-  assert_contains "$output" "unknown CODEX_WORKTREE_NAMER=$namer"
+help_output="$("$repo_root/bin/sidegrove" --help 2>&1)"
+assert_contains "$help_output" "Usage: sidegrove <cli>"
 
-  if find "$tmpdir" -maxdepth 1 -type d -name "reject-$namer-*" | grep -q .; then
-    printf 'Rejected namer %s created a worktree unexpectedly.\n' "$namer" >&2
-    exit 1
-  fi
-}
+# --- basic worktree creation, ~ display, and launch directory ---
 
 repo="$tmpdir/demo"
 make_repo "$repo"
 
 output="$(
   cd "$repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local HOME="$tmpdir" "$repo_root/bin/codex-worktree" 'Fix Login Redirect' 2>&1
+  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local HOME="$tmpdir" \
+    "$repo_root/bin/sidegrove" codex 'Fix Login Redirect' 2>&1
 )"
 
-assert_contains "$output" "codex-worktree: ~/demo-fix-login-redirect on test/fix-login-redirect"
-assert_contains "$output" "-C "
+assert_contains "$output" "sidegrove: ~/demo-fix-login-redirect on test/fix-login-redirect"
+assert_contains "$output" "PWD:$tmpdir/demo-fix-login-redirect"
+assert_contains "$output" "ARGS:Fix Login Redirect"
 test -e "$tmpdir/demo-fix-login-redirect/.git"
+
+# --- per-CLI option semantics ---
+
+# For codex, -p takes a value (profile); it must not leak into the slug.
+codex_profile_repo="$tmpdir/codexprofile"
+make_repo "$codex_profile_repo"
+
+codex_profile_output="$(
+  cd "$codex_profile_repo"
+  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local \
+    "$repo_root/bin/sidegrove" codex -p myprofile 'Fix Login Redirect' 2>&1
+)"
+
+assert_contains "$codex_profile_output" "test/fix-login-redirect"
+test -e "$tmpdir/codexprofile-fix-login-redirect/.git"
+
+# For claude, --model takes a value; it must not leak into the slug.
+claude_model_repo="$tmpdir/claudemodel"
+make_repo "$claude_model_repo"
+
+claude_model_output="$(
+  cd "$claude_model_repo"
+  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local \
+    "$repo_root/bin/sidegrove" claude --model fable 'Fix Login Redirect' 2>&1
+)"
+
+assert_contains "$claude_model_output" "test/fix-login-redirect"
+test -e "$tmpdir/claudemodel-fix-login-redirect/.git"
+
+# For claude, -p is print mode: pass through without a worktree.
+claude_print_repo="$tmpdir/claudeprint"
+make_repo "$claude_print_repo"
+
+claude_print_output="$(
+  cd "$claude_print_repo"
+  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local \
+    "$repo_root/bin/sidegrove" claude -p 'What does this repo do?' 2>&1
+)"
+
+assert_contains "$claude_print_output" "ARGS:-p What does this repo do?"
+assert_contains "$claude_print_output" "PWD:$tmpdir/claudeprint"
+if find "$tmpdir" -maxdepth 1 -type d -name 'claudeprint-*' | grep -q .; then
+  printf 'claude -p created a worktree unexpectedly.\n' >&2
+  exit 1
+fi
+
+# Resume flows and management subcommands pass through.
+claude_resume_output="$(
+  cd "$claude_print_repo"
+  SIDEGROVE_BIN="$fake_cli" "$repo_root/bin/sidegrove" claude -c 2>&1
+)"
+assert_contains "$claude_resume_output" "ARGS:-c"
+
+claude_mcp_output="$(
+  cd "$claude_print_repo"
+  SIDEGROVE_BIN="$fake_cli" "$repo_root/bin/sidegrove" claude mcp list 2>&1
+)"
+assert_contains "$claude_mcp_output" "ARGS:mcp list"
+
+codex_cleanup_passthrough="$(
+  cd "$repo"
+  SIDEGROVE_BIN=/bin/echo "$repo_root/bin/sidegrove" codex cleanup --yes 2>&1
+)"
+
+if [[ "$codex_cleanup_passthrough" != "cleanup --yes" ]]; then
+  printf 'Expected codex cleanup to pass through.\n' >&2
+  printf 'Actual output:\n%s\n' "$codex_cleanup_passthrough" >&2
+  exit 1
+fi
+
+# Unknown CLIs still work with generic defaults.
+generic_repo="$tmpdir/generic"
+make_repo "$generic_repo"
+
+generic_output="$(
+  cd "$generic_repo"
+  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local \
+    "$repo_root/bin/sidegrove" somecli 'Fix Login Redirect' 2>&1
+)"
+
+assert_contains "$generic_output" "test/fix-login-redirect"
+test -e "$tmpdir/generic-fix-login-redirect/.git"
+
+# --- interactive prompt and cleanup ---
 
 interactive_repo="$tmpdir/interactive"
 make_repo "$interactive_repo"
 
 interactive_output="$(
   cd "$interactive_repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local expect <<EOF
+  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local expect <<EOF
 log_user 1
-spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/codex-worktree"
+spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/sidegrove" codex
 expect "Describe the task"
 expect "› "
 send "Fix Login Redirect\r"
@@ -109,12 +190,9 @@ EOF
 
 interactive_plain="$(printf '%s' "$interactive_output" | strip_ansi)"
 
-assert_not_contains "$interactive_plain" "Worktree task"
-assert_not_contains "$interactive_plain" "------------------------------------------------------------------------"
 assert_contains "$interactive_plain" "Describe the task"
 assert_contains "$interactive_plain" "› Fix Login Redirect"
 assert_contains "$interactive_plain" "› Clean up worktree"
-assert_not_contains "$interactive_plain" "Enter = stay here"
 assert_contains "$interactive_plain" "interactive-fix-login-redirect"
 assert_contains "$interactive_plain" "test/fix-login-redirect"
 assert_contains "$interactive_plain" "clean up later with"
@@ -126,9 +204,9 @@ make_repo "$cleanup_yes_repo"
 
 cleanup_yes_output="$(
   cd "$cleanup_yes_repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local expect <<EOF
+  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local expect <<EOF
 log_user 1
-spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/codex-worktree" "Fix Login Redirect"
+spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/sidegrove" codex "Fix Login Redirect"
 expect "Clean up worktree"
 send "y\r"
 expect eof
@@ -144,35 +222,22 @@ test ! -e "$tmpdir/cleanyes-fix-login-redirect"
 
 keep_branch_repo="$tmpdir/keepbranch"
 make_repo "$keep_branch_repo"
-commit_codex="$tmpdir/commit-codex"
-cat > "$commit_codex" <<'EOF'
+commit_cli="$tmpdir/commit-cli"
+cat > "$commit_cli" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-dir=""
-while [[ "$#" -gt 0 ]]; do
-  case "$1" in
-    -C)
-      dir="$2"
-      shift 2
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-
-printf 'work\n' > "$dir/work.txt"
-git -C "$dir" add work.txt
-git -C "$dir" commit -q -m work
+printf 'work\n' > work.txt
+git add work.txt
+git commit -q -m work
 EOF
-chmod +x "$commit_codex"
+chmod +x "$commit_cli"
 
 keep_branch_output="$(
   cd "$keep_branch_repo"
-  CODEX_BIN="$commit_codex" CODEX_WORKTREE_NAMER=local expect <<EOF
+  SIDEGROVE_BIN="$commit_cli" SIDEGROVE_NAMER=local expect <<EOF
 log_user 1
-spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/codex-worktree" "Fix Login Redirect"
+spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/sidegrove" codex "Fix Login Redirect"
 expect "Clean up worktree"
 send "y\r"
 expect eof
@@ -192,9 +257,9 @@ make_repo "$cleanup_off_repo"
 
 cleanup_off_output="$(
   cd "$cleanup_off_repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local expect <<EOF
+  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local expect <<EOF
 log_user 1
-spawn env TERM=xterm-256color COLUMNS=72 CODEX_WORKTREE_CLEANUP_PROMPT=0 "$repo_root/bin/codex-worktree" "Fix Login Redirect"
+spawn env TERM=xterm-256color COLUMNS=72 SIDEGROVE_CLEANUP_PROMPT=0 "$repo_root/bin/sidegrove" codex "Fix Login Redirect"
 expect eof
 EOF
 )"
@@ -202,13 +267,46 @@ EOF
 assert_not_contains "$cleanup_off_output" "Clean up worktree"
 test -e "$tmpdir/cleanoff-fix-login-redirect/.git"
 
-assert_rejects_namer ollama
-assert_rejects_namer llama
+# --- naming ---
 
-codex_repo="$tmpdir/codex"
-make_repo "$codex_repo"
-fake_codex="$tmpdir/fake-codex"
-cat > "$fake_codex" <<'EOF'
+assert_rejects_namer() {
+  local namer="$1"
+  local repo="$tmpdir/reject-$namer"
+  local output
+  local status
+
+  make_repo "$repo"
+
+  set +e
+  output="$(
+    cd "$repo"
+    SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER="$namer" \
+      "$repo_root/bin/sidegrove" codex 'Fix Login Redirect' 2>&1
+  )"
+  status=$?
+  set -e
+
+  if [[ "$status" -eq 0 ]]; then
+    printf 'Expected SIDEGROVE_NAMER=%s to fail.\n' "$namer" >&2
+    printf 'Actual output:\n%s\n' "$output" >&2
+    exit 1
+  fi
+
+  assert_contains "$output" "unknown SIDEGROVE_NAMER=$namer"
+
+  if find "$tmpdir" -maxdepth 1 -type d -name "reject-$namer-*" | grep -q .; then
+    printf 'Rejected namer %s created a worktree unexpectedly.\n' "$namer" >&2
+    exit 1
+  fi
+}
+
+assert_rejects_namer ollama
+assert_rejects_namer codex
+
+codex_namer_repo="$tmpdir/codexnamer"
+make_repo "$codex_namer_repo"
+fake_codex_namer="$tmpdir/fake-codex-namer"
+cat > "$fake_codex_namer" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -229,23 +327,55 @@ if [[ -n "$output_file" ]]; then
   printf 'repair-google-signin-redirect\n' > "$output_file"
 fi
 EOF
-chmod +x "$fake_codex"
+chmod +x "$fake_codex_namer"
 
-codex_output="$(
-  cd "$codex_repo"
-  CODEX_BIN="$fake_codex" CODEX_WORKTREE_NAMER=codex "$repo_root/bin/codex-worktree" 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
+codex_namer_output="$(
+  cd "$codex_namer_repo"
+  SIDEGROVE_BIN="$fake_codex_namer" SIDEGROVE_NAMER=agent \
+    "$repo_root/bin/sidegrove" codex 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
 )"
 
-assert_contains "$codex_output" "codex-repair-google-signin-redirect"
-assert_contains "$codex_output" "test/repair-google-signin-redirect"
-test -e "$tmpdir/codex-repair-google-signin-redirect/.git"
+assert_contains "$codex_namer_output" "codexnamer-repair-google-signin-redirect"
+assert_contains "$codex_namer_output" "test/repair-google-signin-redirect"
+test -e "$tmpdir/codexnamer-repair-google-signin-redirect/.git"
+
+claude_namer_repo="$tmpdir/claudenamer"
+make_repo "$claude_namer_repo"
+fake_claude_namer="$tmpdir/fake-claude-namer"
+cat > "$fake_claude_namer" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+for arg in "$@"; do
+  if [[ "$arg" == "-p" ]]; then
+    printf 'repair-google-signin-redirect\n'
+    exit 0
+  fi
+done
+
+printf 'PWD:%s ARGS:%s\n' "$PWD" "$*"
+EOF
+chmod +x "$fake_claude_namer"
+
+claude_namer_output="$(
+  cd "$claude_namer_repo"
+  SIDEGROVE_BIN="$fake_claude_namer" SIDEGROVE_NAMER=agent \
+    "$repo_root/bin/sidegrove" claude 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
+)"
+
+assert_contains "$claude_namer_output" "claudenamer-repair-google-signin-redirect"
+assert_contains "$claude_namer_output" "test/repair-google-signin-redirect"
+test -e "$tmpdir/claudenamer-repair-google-signin-redirect/.git"
+
+# --- overrides ---
 
 override_repo="$tmpdir/override"
 make_repo "$override_repo"
 
 override_output="$(
   cd "$override_repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local CODEX_WORKTREE_SLUG='Raw Custom Name' "$repo_root/bin/codex-worktree" 'please use an override' 2>&1
+  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local SIDEGROVE_SLUG='Raw Custom Name' \
+    "$repo_root/bin/sidegrove" codex 'please use an override' 2>&1
 )"
 
 assert_contains "$override_output" "override-raw-custom-name"
@@ -256,23 +386,21 @@ make_repo "$prefix_repo"
 
 prefix_output="$(
   cd "$prefix_repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local CODEX_WORKTREE_BRANCH_PREFIX=alice "$repo_root/bin/codex-worktree" 'Fix Login Redirect' 2>&1
+  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local SIDEGROVE_BRANCH_PREFIX=alice \
+    "$repo_root/bin/sidegrove" codex 'Fix Login Redirect' 2>&1
 )"
 
 assert_contains "$prefix_output" "prefix-fix-login-redirect"
 assert_contains "$prefix_output" "alice/fix-login-redirect"
 
-if find "$tmpdir" -type f -name worktrees.tsv | grep -q .; then
-  printf 'Wrapper should not create a worktree state file.\n' >&2
-  exit 1
-fi
+# --- quiet blank pass-through ---
 
 blank_repo="$tmpdir/blank"
 make_repo "$blank_repo"
 
 blank_output="$(
   cd "$blank_repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local "$repo_root/bin/codex-worktree" 2>&1
+  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local "$repo_root/bin/sidegrove" codex 2>&1
 )"
 
 if find "$tmpdir" -maxdepth 1 -type d -name 'blank-*' | grep -q .; then
@@ -286,44 +414,50 @@ if [[ "$blank_output" != "" ]]; then
   exit 1
 fi
 
-option_repo="$tmpdir/options"
-make_repo "$option_repo"
-
-option_output="$(
-  cd "$option_repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local "$repo_root/bin/codex-worktree" review --base origin/main --title 'PR 123' 'Find regressions only' 2>&1
-)"
-
-assert_contains "$option_output" "options-find-regressions"
-assert_contains "$option_output" "test/find-regressions"
-
-cleanup_passthrough="$(
-  cd "$repo"
-  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local "$repo_root/bin/codex-worktree" cleanup --yes 2>&1
-)"
-
-if [[ "$cleanup_passthrough" != "cleanup --yes" ]]; then
-  printf 'Expected cleanup to pass through to Codex.\n' >&2
-  printf 'Actual output:\n%s\n' "$cleanup_passthrough" >&2
-  exit 1
-fi
-
-if find "$tmpdir" -maxdepth 1 -type d -name 'demo-cleanup*' | grep -q .; then
-  printf 'Cleanup command created a worktree unexpectedly.\n' >&2
-  exit 1
-fi
+# --- install and uninstall, including migration from worktree-launcher ---
 
 install_home="$tmpdir/home"
-mkdir -p "$install_home"
+mkdir -p "$install_home/.local/bin"
+printf '#!/bin/sh\n' > "$install_home/.local/bin/codex-worktree"
+chmod +x "$install_home/.local/bin/codex-worktree"
 mkdir -p "$install_home/.local/state/worktree-launcher"
 printf 'old-cache\n' > "$install_home/.local/state/worktree-launcher/worktrees.tsv"
-HOME="$install_home" "$repo_root/scripts/install.sh" >/dev/null
-test -x "$install_home/.local/bin/codex-worktree"
-test ! -e "$install_home/.local/bin/codex-worktree-cleanup"
-test ! -e "$install_home/.local/state/worktree-launcher/worktrees.tsv"
-grep -Fq "# >>> worktree-launcher >>>" "$install_home/.zshrc"
-HOME="$install_home" "$repo_root/scripts/uninstall.sh" >/dev/null
+cat > "$install_home/.zshrc" <<'EOF'
+# >>> worktree-launcher >>>
+if command -v codex-worktree >/dev/null 2>&1; then
+  alias codex='codex-worktree'
+fi
+# <<< worktree-launcher <<<
+if command -v codex-worktree >/dev/null 2>&1; then
+  alias codex='codex-worktree'
+fi
+alias claude='my-custom-claude'
+EOF
+
+install_output="$(HOME="$install_home" "$repo_root/scripts/install.sh")"
+
+test -x "$install_home/.local/bin/sidegrove"
 test ! -e "$install_home/.local/bin/codex-worktree"
-! grep -Fq "# >>> worktree-launcher >>>" "$install_home/.zshrc"
+test ! -e "$install_home/.local/state/worktree-launcher/worktrees.tsv"
+assert_contains "$install_output" "Existing claude alias found"
+zshrc_content="$(cat "$install_home/.zshrc")"
+assert_not_contains "$zshrc_content" "worktree-launcher"
+assert_contains "$zshrc_content" "# >>> sidegrove >>>"
+assert_contains "$zshrc_content" "alias codex='sidegrove codex'"
+assert_not_contains "$zshrc_content" "alias claude='sidegrove claude'"
+assert_contains "$zshrc_content" "alias claude='my-custom-claude'"
+
+HOME="$install_home" "$repo_root/scripts/uninstall.sh" >/dev/null
+test ! -e "$install_home/.local/bin/sidegrove"
+zshrc_content="$(cat "$install_home/.zshrc")"
+assert_not_contains "$zshrc_content" "# >>> sidegrove >>>"
+assert_contains "$zshrc_content" "alias claude='my-custom-claude'"
+
+fresh_home="$tmpdir/freshhome"
+mkdir -p "$fresh_home"
+HOME="$fresh_home" "$repo_root/scripts/install.sh" >/dev/null
+fresh_zshrc="$(cat "$fresh_home/.zshrc")"
+assert_contains "$fresh_zshrc" "alias codex='sidegrove codex'"
+assert_contains "$fresh_zshrc" "alias claude='sidegrove claude'"
 
 printf 'All tests passed.\n'

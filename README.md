@@ -1,11 +1,11 @@
-# Worktree Launcher
+# sidegrove
 
-A small Bash wrapper that gives every Codex CLI task its own Git worktree and branch, without changing the command you type.
+A small Bash wrapper that gives every coding-agent task its own Git worktree and branch, without changing the commands you type. Works with Codex CLI, Claude Code, and any similar CLI.
 
 You still run:
 
 ```sh
-codex
+claude
 ```
 
 From the primary checkout of a repo, the wrapper asks for the task first:
@@ -15,40 +15,57 @@ From the primary checkout of a repo, the wrapper asks for the task first:
 › fix the broken login redirect when users sign in from Google
 ```
 
-It turns the task into a worktree and branch, then starts the real Codex CLI inside it:
+It turns the task into a worktree and branch, then starts the real CLI inside it:
 
 ```text
-codex-worktree: ~/repos/app-fix-broken-login-redirect on jesse/fix-broken-login-redirect
+sidegrove: ~/repos/app-fix-broken-login-redirect on jesse/fix-broken-login-redirect
 ```
 
 When the session ends, it offers to clean up after itself:
 
 ```text
 › Clean up worktree ~/repos/app-fix-broken-login-redirect? [y/N] y
-codex-worktree: removing ~/repos/app-fix-broken-login-redirect ...
-codex-worktree: removed ~/repos/app-fix-broken-login-redirect
-codex-worktree: deleted branch jesse/fix-broken-login-redirect
+sidegrove: removing ~/repos/app-fix-broken-login-redirect ...
+sidegrove: removed ~/repos/app-fix-broken-login-redirect
+sidegrove: deleted branch jesse/fix-broken-login-redirect
 ```
 
-Each task gets an isolated checkout, so parallel Codex sessions never trip over each other and your main checkout stays clean. Press Enter on a blank prompt to run Codex in the current checkout instead.
+Each task gets an isolated checkout, so parallel agent sessions never trip over each other and your main checkout stays clean. Press Enter on a blank prompt to run in the current checkout instead.
 
 ## Why
 
-Running coding agents in Git worktrees is the standard way to isolate parallel work, but the Codex CLI has no built-in flow for it on local checkouts. This wrapper adds the missing steps — create the worktree, start Codex inside it, offer to remove it afterwards — and nothing else. [docs/prior-art.md](docs/prior-art.md) covers the background.
+Running coding agents in Git worktrees is the standard way to isolate parallel work, but doing it by hand means naming a branch, creating the worktree, starting the agent there, and remembering to remove it later. sidegrove folds all of that into the command you already type, with the same flow for every CLI. [docs/prior-art.md](docs/prior-art.md) covers the background.
+
+## Supported CLIs
+
+The wrapper is one binary invoked as `sidegrove <cli>`:
+
+```sh
+sidegrove codex "Fix login redirect"
+sidegrove claude "Fix login redirect"
+```
+
+`codex` and `claude` get tailored handling: their value-taking flags are understood when extracting the task from arguments, their management subcommands (`mcp`, `doctor`, `update`, ...) pass through, and their resume flows (`codex resume`, `claude -c` / `-r`) never create worktrees. For Claude Code, `-p` print mode and the built-in `-w` worktree flag also pass through untouched.
+
+Any other CLI works with safe generic defaults:
+
+```sh
+alias mycli='sidegrove mycli'
+```
 
 ## Requirements
 
 - macOS or Linux with Bash 3.2+
 - Git 2.5+ (the first version with `git worktree`)
-- The Codex CLI somewhere on your `PATH`
-- `python3`, only if you opt into Codex naming with `CODEX_WORKTREE_NAMER=codex`
+- The agent CLIs you use somewhere on your `PATH`
+- `python3`, only if you opt into agent naming with `SIDEGROVE_NAMER=agent`
 - `expect`, only for running the test suite
 
 ## Install
 
 ```sh
-git clone https://github.com/jesse-merhi/worktree-launcher.git ~/repos/worktree-launcher
-cd ~/repos/worktree-launcher
+git clone https://github.com/jesse-merhi/sidegrove.git ~/repos/sidegrove
+cd ~/repos/sidegrove
 ./scripts/install.sh
 ```
 
@@ -61,30 +78,35 @@ source ~/.zshrc
 The installer copies:
 
 ```text
-bin/codex-worktree -> ~/.local/bin/codex-worktree
+bin/sidegrove -> ~/.local/bin/sidegrove
 ```
 
-and adds this shell alias if one is not already present:
+and adds a managed alias block to `~/.zshrc`:
 
 ```sh
-alias codex='codex-worktree'
+alias codex='sidegrove codex'
+alias claude='sidegrove claude'
 ```
+
+Each alias is guarded by a `command -v` check, so nothing breaks if one of the CLIs is not installed. Aliases you wrote yourself are detected and left alone. Installing over an old `worktree-launcher` setup migrates it automatically.
 
 ## Uninstall
 
 ```sh
-cd ~/repos/worktree-launcher
+cd ~/repos/sidegrove
 ./scripts/uninstall.sh
 ```
 
-The uninstaller removes the installed wrapper and the managed shell block. If you wrote your own `codex` alias by hand, it is left alone and a warning is printed.
+The uninstaller removes the installed wrapper and the managed shell block.
 
 ## When it stays out of the way
 
-The wrapper only steps in for a fresh Codex session started from the primary checkout of a Git repo. Everything else goes straight to the real binary:
+The wrapper only steps in for a fresh session started from the primary checkout of a Git repo. Everything else goes straight to the real binary:
 
-- subcommands that manage Codex itself: `resume`, `fork`, `doctor`, `cloud`, `app`, `update`, `cleanup`, `worktrees`, `login`, `mcp`, and friends
-- explicit directory flags: `codex -C ...` and `codex --cd ...`
+- management subcommands (`mcp`, `doctor`, `update`, `login`, ...)
+- resume and continue flows (`codex resume`, `claude -c`, `claude -r`)
+- `claude -p` print mode and `claude -w` native worktrees
+- explicit directory flags (`codex -C ...`)
 - `--help` and `--version`
 - outside a Git repo
 - already inside a linked worktree
@@ -95,12 +117,12 @@ The wrapper only steps in for a fresh Codex session started from the primary che
 The worktree is created next to your repo and the branch is `<prefix>/<slug>`:
 
 ```text
-~/repos/app                          your checkout
+~/repos/app                              your checkout
 ~/repos/app-fix-broken-login-redirect    the task worktree
 jesse/fix-broken-login-redirect          its branch
 ```
 
-The prefix is the first word of your Git `user.name`, lowercased, falling back to `$USER`, then `codex`.
+The prefix is the first word of your Git `user.name`, lowercased, falling back to `$USER`, then `agent`.
 
 The slug comes from the task text. The default namer is local and instant: lowercase, drop filler words like `please`, `you`, `the`, and `when`, keep the first few meaningful words:
 
@@ -109,19 +131,19 @@ Can you please fix the broken login redirect when users sign in from Google?
 -> fix-broken-login-redirect
 ```
 
-You can ask Codex to name the branch instead:
+You can ask the agent itself to name the branch instead:
 
 ```sh
-CODEX_WORKTREE_NAMER=codex codex "Fix login redirect"
+SIDEGROVE_NAMER=agent claude "Fix login redirect"
 ```
 
-That is opt-in because starting a second Codex agent just to name a worktree is noticeably slower. If it fails or times out, the local namer takes over.
+For Codex this runs a tiny `codex exec` call; for Claude Code a `claude -p` call with a fast model. It is opt-in because spinning up a second agent just to name a worktree adds a few seconds. If it fails or times out, the local namer takes over.
 
 New worktrees branch from the repo's default branch (`origin/HEAD`, falling back to `main`, then `master`). If the branch already exists, locally or on the remote, it is checked out instead of recreated.
 
 ## Cleanup
 
-When the Codex session ends, the wrapper asks:
+When the session ends, the wrapper asks:
 
 ```text
 › Clean up worktree ~/repos/app-fix-broken-login-redirect? [y/N]
@@ -134,7 +156,7 @@ Saying yes cannot lose work:
 - Git refuses to remove a worktree with uncommitted or untracked files.
 - A branch with its own commits is kept, and the exact `git branch -D` command to delete it deliberately is printed.
 
-The default is no. Saying no keeps the worktree and prints the removal command for later. The prompt never appears in non-interactive shells, and `CODEX_WORKTREE_CLEANUP_PROMPT=0` disables it entirely.
+The default is no. Saying no keeps the worktree and prints the removal command for later. The prompt never appears in non-interactive shells, and `SIDEGROVE_CLEANUP_PROMPT=0` disables it entirely.
 
 There is no state file and no tracking: cleanup is a thin prompt over native `git worktree` commands.
 
@@ -144,24 +166,24 @@ Everything is an environment variable, so one-off overrides are just a prefix on
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `CODEX_BIN` | first `codex` on `PATH` | Codex binary to launch |
-| `CODEX_WORKTREE_NAMER` | `local` | `codex` asks Codex to name the branch |
-| `CODEX_WORKTREE_NAMER_MODEL` | `gpt-5.1-codex` | Model used for Codex naming |
-| `CODEX_WORKTREE_NAMER_TIMEOUT` | `8` | Seconds before Codex naming falls back to local |
-| `CODEX_WORKTREE_SLUG` | derived from the task | Slug used in worktree and branch names |
-| `CODEX_WORKTREE_BRANCH_PREFIX` | first word of Git `user.name` | Branch prefix in `<prefix>/<slug>` |
-| `CODEX_WORKTREE_BRANCH` | `<prefix>/<slug>` | Full branch name |
-| `CODEX_WORKTREE_DIR` | `../<repo>-<slug>` | Worktree path |
-| `CODEX_WORKTREE_BASE` | repo default branch | Base branch for new worktrees |
-| `CODEX_WORKTREE_FETCH` | `0` | `1` fetches the base branch before creating the worktree |
-| `CODEX_WORKTREE_CLEANUP_PROMPT` | `1` | `0` skips the exit-time cleanup prompt |
+| `SIDEGROVE_BIN` | first `<cli>` on `PATH` | Binary to launch for the wrapped CLI |
+| `SIDEGROVE_NAMER` | `local` | `agent` asks the wrapped CLI to name the branch |
+| `SIDEGROVE_NAMER_MODEL` | per CLI | Model used for agent naming |
+| `SIDEGROVE_NAMER_TIMEOUT` | `8` | Seconds before agent naming falls back to local |
+| `SIDEGROVE_SLUG` | derived from the task | Slug used in worktree and branch names |
+| `SIDEGROVE_BRANCH_PREFIX` | first word of Git `user.name` | Branch prefix in `<prefix>/<slug>` |
+| `SIDEGROVE_BRANCH` | `<prefix>/<slug>` | Full branch name |
+| `SIDEGROVE_DIR` | `../<repo>-<slug>` | Worktree path |
+| `SIDEGROVE_BASE` | repo default branch | Base branch for new worktrees |
+| `SIDEGROVE_FETCH` | `0` | `1` fetches the base branch before creating the worktree |
+| `SIDEGROVE_CLEANUP_PROMPT` | `1` | `0` skips the exit-time cleanup prompt |
 
 Examples:
 
 ```sh
-CODEX_WORKTREE_SLUG=login-redirect codex "Fix login redirect"
-CODEX_WORKTREE_BASE=develop codex "Fix login redirect"
-CODEX_WORKTREE_BRANCH_PREFIX=alice codex "Fix login redirect"
+SIDEGROVE_SLUG=login-redirect claude "Fix login redirect"
+SIDEGROVE_BASE=develop codex "Fix login redirect"
+SIDEGROVE_BRANCH_PREFIX=alice claude "Fix login redirect"
 ```
 
 Fetch is off by default so the wrapper stays fast.
@@ -172,7 +194,7 @@ Fetch is off by default so the wrapper stays fast.
 ./scripts/test.sh
 ```
 
-The tests syntax-check every script, then drive real worktree creation and the interactive prompts end to end in temp repos with temp home directories. `CODEX_BIN` points at `/bin/echo` or a small fake, so no real Codex session ever starts and your `~/.zshrc` is never touched.
+The tests syntax-check every script, then drive worktree creation, per-CLI argument handling, the interactive prompts, and cleanup end to end in temp repos with temp home directories. The wrapped binary is `/bin/echo` or a small fake, so no real agent session ever starts and your `~/.zshrc` is never touched.
 
 [AGENTS.md](AGENTS.md) covers repo layout and the conventions for changes.
 
@@ -180,4 +202,4 @@ The tests syntax-check every script, then drive real worktree creation and the i
 
 This is intentionally small. It is a launcher, not a session manager.
 
-It cannot change the working directory of a running Codex TUI session. It creates the worktree first, then starts the real CLI with `-C`.
+It cannot change the working directory of a running TUI session. It creates the worktree first, then starts the real CLI inside it.

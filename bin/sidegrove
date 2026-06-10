@@ -1,7 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-resolve_codex_bin() {
+usage() {
+  cat >&2 <<'EOF'
+Usage: sidegrove <cli> [args...]
+
+Runs an agent CLI in a task-specific Git worktree. Known CLIs get
+tailored argument handling: codex, claude. Any other CLI gets safe
+generic handling.
+
+Normally invoked through the shell aliases added by scripts/install.sh:
+
+  alias codex='sidegrove codex'
+  alias claude='sidegrove claude'
+EOF
+}
+
+cli="${1:-}"
+
+case "$cli" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  '')
+    usage
+    exit 2
+    ;;
+esac
+
+shift
+
+resolve_cli_bin() {
   local candidate
 
   while IFS= read -r candidate; do
@@ -9,43 +39,112 @@ resolve_codex_bin() {
       printf '%s\n' "$candidate"
       return
     fi
-  done < <(type -ap codex)
+  done < <(type -ap "$cli")
 }
 
-CODEX_BIN="${CODEX_BIN:-$(resolve_codex_bin)}"
+cli_bin="${SIDEGROVE_BIN:-$(resolve_cli_bin)}"
 
-if [[ -z "$CODEX_BIN" ]]; then
-  printf 'codex-worktree: codex not found in PATH; set CODEX_BIN\n' >&2
+if [[ -z "$cli_bin" ]]; then
+  printf 'sidegrove: %s not found in PATH; set SIDEGROVE_BIN\n' "$cli" >&2
   exit 1
 fi
 
-value_options=(
-  -a --ask-for-approval
-  -c --config
-  -i --image
-  -m --model
-  -o --output-last-message
-  -p --profile
-  -s --sandbox
-  --add-dir
-  --base
-  --color
-  --commit
-  --disable
-  --enable
-  --local-provider
-  --output-schema
-  --remote
-  --remote-auth-token-env
-  --title
-)
+# Options that consume the next argument, so prompt extraction skips it.
+cli_value_options() {
+  case "$cli" in
+    codex)
+      printf '%s' '-a --ask-for-approval -c --config -i --image -m --model
+        -o --output-last-message -p --profile -s --sandbox --add-dir --base
+        --color --commit --disable --enable --local-provider --output-schema
+        --remote --remote-auth-token-env --title'
+      ;;
+    claude)
+      printf '%s' '--add-dir --agent --agents --allowedTools --allowed-tools
+        --append-system-prompt --betas -d --debug --debug-file
+        --disallowedTools --disallowed-tools --effort --fallback-model --file
+        --input-format --json-schema --max-budget-usd --mcp-config --model
+        -n --name --output-format --permission-mode --plugin-dir --plugin-url
+        --remote-control-session-name-prefix --session-id --setting-sources
+        --settings --system-prompt --tools'
+      ;;
+    *)
+      printf '%s' '-m --model'
+      ;;
+  esac
+}
 
-option_takes_value() {
-  local option="$1"
-  local value_option
+# Subcommands that manage the CLI itself; never start a worktree session.
+cli_passthrough_subcommands() {
+  case "$cli" in
+    codex)
+      printf '%s' 'help login logout mcp plugin mcp-server app app-server
+        exec-server remote-control completion update doctor features archive
+        unarchive fork resume cloud sandbox debug apply cleanup worktrees'
+      ;;
+    claude)
+      printf '%s' 'agents auth auto-mode doctor install mcp plugin plugins
+        project setup-token ultrareview update upgrade'
+      ;;
+    *)
+      printf '%s' 'help login logout config doctor update completion version'
+      ;;
+  esac
+}
 
-  for value_option in "${value_options[@]}"; do
-    [[ "$option" == "$value_option" ]] && return 0
+# Flags anywhere in the arguments that mean "not a fresh task session":
+# resume flows, print mode, and the CLI's own worktree handling.
+cli_passthrough_flags() {
+  case "$cli" in
+    codex)
+      printf '%s' '-C --cd'
+      ;;
+    claude)
+      printf '%s' '-c --continue -r --resume --from-pr -w --worktree -p --print'
+      ;;
+    *)
+      printf '%s' ''
+      ;;
+  esac
+}
+
+# Subcommands that still carry a task prompt worth a worktree.
+cli_prompt_subcommands() {
+  case "$cli" in
+    codex)
+      printf '%s' 'exec review'
+      ;;
+    *)
+      printf '%s' ''
+      ;;
+  esac
+}
+
+default_namer_model() {
+  case "$cli" in
+    codex)
+      printf 'gpt-5.1-codex'
+      ;;
+    claude)
+      printf 'haiku'
+      ;;
+    *)
+      printf ''
+      ;;
+  esac
+}
+
+value_options="$(cli_value_options)"
+passthrough_subcommands="$(cli_passthrough_subcommands)"
+passthrough_flags="$(cli_passthrough_flags)"
+prompt_subcommands="$(cli_prompt_subcommands)"
+
+list_contains() {
+  local needle="$1"
+  local item
+
+  # $2 is a whitespace-separated list; word splitting is intentional.
+  for item in $2; do
+    [[ "$item" == "$needle" ]] && return 0
   done
 
   return 1
@@ -64,19 +163,21 @@ prompt_from_args() {
     fi
 
     if [[ "$after_dashdash" == false ]]; then
+      if [[ "$arg" == "--" ]]; then
+        after_dashdash=true
+        continue
+      fi
+
+      if list_contains "$arg" "$prompt_subcommands"; then
+        continue
+      fi
+
       case "$arg" in
-        exec|review)
-          continue
-          ;;
-        --)
-          after_dashdash=true
-          continue
-          ;;
         --*=*)
           continue
           ;;
         -*)
-          if option_takes_value "$arg"; then
+          if list_contains "$arg" "$value_options"; then
             skip_next=true
           fi
           continue
@@ -148,15 +249,15 @@ slug_from_prompt() {
   printf '%s' "$slug" | cut -c 1-48 | sed -E 's/[._-]+$//'
 }
 
-slug_from_codex() {
+slug_from_agent() {
   local value="$1"
-  local model="${CODEX_WORKTREE_NAMER_MODEL:-gpt-5.1-codex}"
-  local timeout_seconds="${CODEX_WORKTREE_NAMER_TIMEOUT:-8}"
+  local model="${SIDEGROVE_NAMER_MODEL:-$(default_namer_model)}"
+  local timeout_seconds="${SIDEGROVE_NAMER_TIMEOUT:-8}"
 
   command -v python3 >/dev/null 2>&1 || return 1
-  [[ -x "$CODEX_BIN" ]] || command -v "$CODEX_BIN" >/dev/null 2>&1 || return 1
+  [[ -x "$cli_bin" ]] || command -v "$cli_bin" >/dev/null 2>&1 || return 1
 
-  CODEX_NAMER_PROMPT="$value" python3 - "$CODEX_BIN" "$model" "$timeout_seconds" <<'PY'
+  SIDEGROVE_NAMER_PROMPT="$value" python3 - "$cli" "$cli_bin" "$model" "$timeout_seconds" <<'PY'
 from __future__ import annotations
 
 import os
@@ -166,15 +267,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-codex_bin = sys.argv[1]
-model = sys.argv[2]
+cli = sys.argv[1]
+cli_bin = sys.argv[2]
+model = sys.argv[3]
 
 try:
-    timeout_seconds = max(1, int(sys.argv[3]))
+    timeout_seconds = max(1, int(sys.argv[4]))
 except ValueError:
     timeout_seconds = 8
 
-task = os.environ.get("CODEX_NAMER_PROMPT", "")
+task = os.environ.get("SIDEGROVE_NAMER_PROMPT", "")
 if not task.strip():
     raise SystemExit(1)
 
@@ -193,45 +295,67 @@ Task:
 
 with tempfile.TemporaryDirectory() as tmpdir:
     output_path = Path(tmpdir) / "slug.txt"
-    command = [
-        codex_bin,
-        "exec",
-        "--ephemeral",
-        "--skip-git-repo-check",
-        "--ignore-rules",
-        "--disable",
-        "hooks",
-        "--color",
-        "never",
-        "-c",
-        'model_reasoning_effort="none"',
-        "-s",
-        "read-only",
-        "-C",
-        tmpdir,
-        "-m",
-        model,
-        "-o",
-        str(output_path),
-        prompt,
-    ]
+
+    if cli == "codex":
+        command = [
+            cli_bin,
+            "exec",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--ignore-rules",
+            "--disable",
+            "hooks",
+            "--color",
+            "never",
+            "-c",
+            'model_reasoning_effort="none"',
+            "-s",
+            "read-only",
+            "-C",
+            tmpdir,
+            "-m",
+            model,
+            "-o",
+            str(output_path),
+            prompt,
+        ]
+    elif cli == "claude":
+        command = [
+            cli_bin,
+            "-p",
+            prompt,
+            "--tools",
+            "",
+            "--no-session-persistence",
+        ]
+        if model:
+            command += ["--model", model]
+    else:
+        raise SystemExit(1)
 
     try:
-        subprocess.run(
+        result = subprocess.run(
             command,
             check=True,
+            cwd=tmpdir,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=timeout_seconds,
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         raise SystemExit(1)
 
-    try:
-        raw_slug = output_path.read_text(encoding="utf-8").strip().splitlines()[0]
-    except (OSError, IndexError):
-        raise SystemExit(1)
+    if cli == "codex":
+        try:
+            raw_slug = output_path.read_text(encoding="utf-8").strip().splitlines()[0]
+        except (OSError, IndexError):
+            raise SystemExit(1)
+    else:
+        lines = [line for line in result.stdout.decode("utf-8").splitlines() if line.strip()]
+        if not lines:
+            raise SystemExit(1)
+        raw_slug = lines[-1].strip()
 
 slug = re.sub(r"[^a-z0-9]+", "-", raw_slug.lower()).strip("-")[:48].strip("-")
 if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,47}", slug):
@@ -243,17 +367,17 @@ PY
 
 name_slug() {
   local value="$1"
-  local namer="${CODEX_WORKTREE_NAMER:-local}"
+  local namer="${SIDEGROVE_NAMER:-local}"
   local slug=""
 
   case "$namer" in
-    codex)
-      slug="$(slug_from_codex "$value" 2>/dev/null || true)"
+    agent)
+      slug="$(slug_from_agent "$value" 2>/dev/null || true)"
       ;;
     local)
       ;;
     *)
-      printf 'codex-worktree: unknown CODEX_WORKTREE_NAMER=%s\n' "$namer" >&2
+      printf 'sidegrove: unknown SIDEGROVE_NAMER=%s\n' "$namer" >&2
       return 1
       ;;
   esac
@@ -286,7 +410,7 @@ terminal_columns() {
 }
 
 # Reads a line of input on a Codex-style grey band into band_reply.
-# An optional dim header row sits above the " › " input row.
+# An optional dim header row sits above the "› " input row.
 read_band_reply() {
   local header="$1"
   local label="$2"
@@ -366,22 +490,22 @@ offer_worktree_cleanup() {
 
   case "$answer" in
     y|Y|yes|Yes|YES)
-      printf 'codex-worktree: removing %s ...\n' "$(display_path "$worktree_dir")" >&2
+      printf 'sidegrove: removing %s ...\n' "$(display_path "$worktree_dir")" >&2
       if git -C "$repo_root" worktree remove "$worktree_dir"; then
-        printf 'codex-worktree: removed %s\n' "$(display_path "$worktree_dir")" >&2
+        printf 'sidegrove: removed %s\n' "$(display_path "$worktree_dir")" >&2
         if branch_is_merged_into_base &&
           git -C "$repo_root" branch -D "$branch_name" >/dev/null 2>&1; then
-          printf 'codex-worktree: deleted branch %s\n' "$branch_name" >&2
+          printf 'sidegrove: deleted branch %s\n' "$branch_name" >&2
         else
-          printf 'codex-worktree: kept branch %s (has commits not on %s); delete with:\n\n  git -C %q branch -D %q\n' \
+          printf 'sidegrove: kept branch %s (has commits not on %s); delete with:\n\n  git -C %q branch -D %q\n' \
             "$branch_name" "$base_branch" "$repo_root" "$branch_name" >&2
         fi
       else
-        printf 'codex-worktree: not removed; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
+        printf 'sidegrove: not removed; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
       fi
       ;;
     *)
-      printf 'codex-worktree: keeping worktree; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
+      printf 'sidegrove: keeping worktree; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
       ;;
   esac
 }
@@ -425,27 +549,29 @@ default_branch_prefix() {
     prefix="$(slugify "$USER")"
   fi
 
-  printf '%s\n' "${prefix:-codex}"
+  printf '%s\n' "${prefix:-agent}"
 }
 
 first_arg="${1:-}"
 
 for arg in "$@"; do
   case "$arg" in
-    -C|--cd|--help|-h|--version|-V)
-      exec "$CODEX_BIN" "$@"
+    -h|--help|-V|-v|--version)
+      exec "$cli_bin" "$@"
       ;;
   esac
+
+  if list_contains "$arg" "$passthrough_flags"; then
+    exec "$cli_bin" "$@"
+  fi
 done
 
-case "$first_arg" in
-  help|login|logout|mcp|plugin|mcp-server|app|app-server|exec-server|remote-control|completion|update|doctor|features|archive|unarchive|fork|resume|cloud|sandbox|debug|apply|cleanup|worktrees)
-    exec "$CODEX_BIN" "$@"
-    ;;
-esac
+if [[ -n "$first_arg" ]] && list_contains "$first_arg" "$passthrough_subcommands"; then
+  exec "$cli_bin" "$@"
+fi
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  exec "$CODEX_BIN" "$@"
+  exec "$cli_bin" "$@"
 fi
 
 canonical_dir() {
@@ -458,7 +584,8 @@ primary_worktree="$(git -C "$repo_root" worktree list --porcelain | awk 'NR == 1
 primary_worktree="$(canonical_dir "$primary_worktree")"
 
 if [[ "$repo_root" != "$primary_worktree" ]]; then
-  exec "$CODEX_BIN" -C "$repo_root" "$@"
+  cd "$repo_root"
+  exec "$cli_bin" "$@"
 fi
 
 repo_name="$(basename "$repo_root")"
@@ -474,10 +601,10 @@ if [[ -z "$prompt_text" && -t 0 && -t 1 ]]; then
 fi
 
 if [[ -z "$prompt_text" ]]; then
-  exec "$CODEX_BIN" "$@"
+  exec "$cli_bin" "$@"
 fi
 
-slug="${CODEX_WORKTREE_SLUG:-}"
+slug="${SIDEGROVE_SLUG:-}"
 if [[ -z "$slug" ]]; then
   slug="$(name_slug "$prompt_text")"
 else
@@ -485,30 +612,30 @@ else
 fi
 
 if [[ -z "$slug" ]]; then
-  exec "$CODEX_BIN" "$@"
+  exec "$cli_bin" "$@"
 fi
 
-base_branch="${CODEX_WORKTREE_BASE:-}"
+base_branch="${SIDEGROVE_BASE:-}"
 if [[ -z "$base_branch" ]]; then
   base_branch="$(default_base_branch)"
 fi
 base_branch="${base_branch:-main}"
 
-branch_prefix="${CODEX_WORKTREE_BRANCH_PREFIX:-}"
+branch_prefix="${SIDEGROVE_BRANCH_PREFIX:-}"
 if [[ -z "$branch_prefix" ]]; then
   branch_prefix="$(default_branch_prefix)"
 fi
 
-worktree_dir="${CODEX_WORKTREE_DIR:-$parent_dir/$repo_name-$slug}"
-branch_name="${CODEX_WORKTREE_BRANCH:-$branch_prefix/$slug}"
+worktree_dir="${SIDEGROVE_DIR:-$parent_dir/$repo_name-$slug}"
+branch_name="${SIDEGROVE_BRANCH:-$branch_prefix/$slug}"
 
 if [[ ! -e "$worktree_dir/.git" ]]; then
   if [[ -e "$worktree_dir" ]]; then
-    printf 'codex-worktree: %s exists but is not a git worktree\n' "$worktree_dir" >&2
+    printf 'sidegrove: %s exists but is not a git worktree\n' "$worktree_dir" >&2
     exit 1
   fi
 
-  if [[ "${CODEX_WORKTREE_FETCH:-0}" == "1" ]] &&
+  if [[ "${SIDEGROVE_FETCH:-0}" == "1" ]] &&
     git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
     git -C "$repo_root" fetch origin "$base_branch" --quiet || true
   fi
@@ -524,15 +651,16 @@ if [[ ! -e "$worktree_dir/.git" ]]; then
   fi
 fi
 
-printf 'codex-worktree: %s on %s\n' "$(display_path "$worktree_dir")" "$branch_name" >&2
+printf 'sidegrove: %s on %s\n' "$(display_path "$worktree_dir")" "$branch_name" >&2
 
-if [[ "${CODEX_WORKTREE_CLEANUP_PROMPT:-1}" != "1" || ! -t 0 || ! -t 1 ]]; then
-  exec "$CODEX_BIN" -C "$worktree_dir" "$@"
+if [[ "${SIDEGROVE_CLEANUP_PROMPT:-1}" != "1" || ! -t 0 || ! -t 1 ]]; then
+  cd "$worktree_dir"
+  exec "$cli_bin" "$@"
 fi
 
-codex_status=0
-"$CODEX_BIN" -C "$worktree_dir" "$@" || codex_status=$?
+cli_status=0
+(cd "$worktree_dir" && "$cli_bin" "$@") || cli_status=$?
 
 offer_worktree_cleanup
 
-exit "$codex_status"
+exit "$cli_status"

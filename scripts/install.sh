@@ -2,20 +2,21 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-bin_dir="${WORKTREE_LAUNCHER_BIN_DIR:-$HOME/.local/bin}"
-shell_rc="${WORKTREE_LAUNCHER_SHELL_RC:-$HOME/.zshrc}"
-target="$bin_dir/codex-worktree"
-obsolete_cleanup_target="$bin_dir/codex-worktree-cleanup"
-obsolete_state_file="$HOME/.local/state/worktree-launcher/worktrees.tsv"
+bin_dir="${SIDEGROVE_BIN_DIR:-$HOME/.local/bin}"
+shell_rc="${SIDEGROVE_SHELL_RC:-$HOME/.zshrc}"
+target="$bin_dir/sidegrove"
 
 mkdir -p "$bin_dir"
-install -m 0755 "$repo_root/bin/codex-worktree" "$target"
+install -m 0755 "$repo_root/bin/sidegrove" "$target"
 
-if [[ -e "$obsolete_cleanup_target" ]]; then
-  rm -f "$obsolete_cleanup_target"
-  printf 'Removed obsolete %s\n' "$obsolete_cleanup_target"
-fi
+for obsolete in "$bin_dir/codex-worktree" "$bin_dir/codex-worktree-cleanup"; do
+  if [[ -e "$obsolete" ]]; then
+    rm -f "$obsolete"
+    printf 'Removed obsolete %s\n' "$obsolete"
+  fi
+done
 
+obsolete_state_file="$HOME/.local/state/worktree-launcher/worktrees.tsv"
 if [[ -f "$obsolete_state_file" ]]; then
   rm -f "$obsolete_state_file"
   printf 'Removed obsolete %s\n' "$obsolete_state_file"
@@ -25,31 +26,54 @@ if [[ ! -e "$shell_rc" ]]; then
   touch "$shell_rc"
 fi
 
-if grep -Fq "# >>> worktree-launcher >>>" "$shell_rc"; then
-  tmp_file="$(mktemp)"
-  awk '
-    $0 == "# >>> worktree-launcher >>>" { in_block = 1; next }
-    $0 == "# <<< worktree-launcher <<<" { in_block = 0; next }
-    !in_block { print }
-  ' "$shell_rc" > "$tmp_file"
-  mv "$tmp_file" "$shell_rc"
-fi
+strip_block() {
+  local marker="$1"
+  local tmp_file
 
-if grep -Eq "^[[:space:]]*alias[[:space:]]+codex=['\"]codex-worktree['\"]" "$shell_rc"; then
-  printf 'Installed %s\n' "$target"
-  printf 'Existing codex alias found in %s; leaving it in place.\n' "$shell_rc"
-  exit 0
-fi
+  if grep -Fq "# >>> $marker >>>" "$shell_rc"; then
+    tmp_file="$(mktemp)"
+    awk -v start="# >>> $marker >>>" -v end="# <<< $marker <<<" '
+      $0 == start { in_block = 1; next }
+      $0 == end { in_block = 0; next }
+      !in_block { print }
+    ' "$shell_rc" > "$tmp_file"
+    mv "$tmp_file" "$shell_rc"
+  fi
+}
 
-cat >> "$shell_rc" <<'EOF'
+strip_block worktree-launcher
+strip_block sidegrove
 
-# >>> worktree-launcher >>>
-if command -v codex-worktree >/dev/null 2>&1; then
-  alias codex='codex-worktree'
+# A leftover alias pointing at the old codex-worktree binary is ours to
+# replace; the managed block below is appended later in the file, so it
+# wins over the stale line.
+has_foreign_alias() {
+  grep -Eq "^[[:space:]]*alias[[:space:]]+$1=" "$shell_rc" &&
+    ! grep -Eq "^[[:space:]]*alias[[:space:]]+$1=['\"]codex-worktree['\"]" "$shell_rc"
+}
+
+aliases=()
+for cli_name in codex claude; do
+  if has_foreign_alias "$cli_name"; then
+    printf 'Existing %s alias found in %s; leaving it in place.\n' "$cli_name" "$shell_rc"
+  else
+    aliases+=("$cli_name")
+  fi
+done
+
+if [[ "${#aliases[@]}" -gt 0 ]]; then
+  {
+    printf '\n# >>> sidegrove >>>\n'
+    printf 'if command -v sidegrove >/dev/null 2>&1; then\n'
+    for cli_name in "${aliases[@]}"; do
+      printf "  if command -v %s >/dev/null 2>&1; then\n" "$cli_name"
+      printf "    alias %s='sidegrove %s'\n" "$cli_name" "$cli_name"
+      printf '  fi\n'
+    done
+    printf 'fi\n# <<< sidegrove <<<\n'
+  } >> "$shell_rc"
+  printf 'Added shell alias block to %s\n' "$shell_rc"
 fi
-# <<< worktree-launcher <<<
-EOF
 
 printf 'Installed %s\n' "$target"
-printf 'Added shell alias block to %s\n' "$shell_rc"
 printf 'Restart your shell or run: source %s\n' "$shell_rc"
