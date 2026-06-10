@@ -274,13 +274,13 @@ read_worktree_prompt() {
     local columns
 
     columns="$(terminal_columns)"
-    printf '\n  \033[2mWorktree task\033[0m\n' >&2
+    printf '\033[48;5;236m%*s\n' "$columns" '' >&2
     printf '\033[48;5;236m%*s\r' "$columns" '' >&2
     printf '  \033[1m>\033[22m  Describe the task \033[2m(Enter = stay here)\033[22m  ' >&2
     IFS= read -r prompt_text || prompt_text=""
-    printf '\033[0m' >&2
+    printf '\033[48;5;236m%*s\033[0m\n' "$columns" '' >&2
   else
-    printf '\n  Worktree task\n  >  Describe the task (Enter = stay here): ' >&2
+    printf '\n  >  Describe the task (Enter = stay here): ' >&2
     IFS= read -r prompt_text || prompt_text=""
   fi
 }

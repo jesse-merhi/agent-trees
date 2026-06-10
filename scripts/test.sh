@@ -33,6 +33,17 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+
+  if [[ "$haystack" == *"$needle"* ]]; then
+    printf 'Expected output not to contain: %s\n' "$needle" >&2
+    printf 'Actual output:\n%s\n' "$haystack" >&2
+    exit 1
+  fi
+}
+
 assert_rejects_namer() {
   local namer="$1"
   local repo="$tmpdir/reject-$namer"
@@ -90,7 +101,7 @@ expect eof
 EOF
 )"
 
-assert_contains "$interactive_output" "Worktree task"
+assert_not_contains "$interactive_output" "Worktree task"
 assert_contains "$interactive_output" "  >  Describe the task"
 assert_contains "$interactive_output" "Enter = stay here"
 assert_contains "$interactive_output" "interactive-fix-login-redirect"
