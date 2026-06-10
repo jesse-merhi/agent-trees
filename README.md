@@ -12,7 +12,6 @@ If you are in the primary checkout of a Git repo, the wrapper asks:
 
 ```text
   >  Describe the task (Enter = stay here)
-  ------------------------------------------------------------
 ```
 
 Type the task:

@@ -102,9 +102,9 @@ EOF
 )"
 
 assert_not_contains "$interactive_output" "Worktree task"
+assert_not_contains "$interactive_output" "------------------------------------------------------------------------"
 assert_contains "$interactive_output" "  >  Describe the task"
 assert_contains "$interactive_output" "Enter = stay here"
-assert_contains "$interactive_output" "------------------------------------------------------------------------"
 assert_contains "$interactive_output" "interactive-fix-login-redirect"
 assert_contains "$interactive_output" "jesse/fix-login-redirect"
 test -e "$tmpdir/interactive-fix-login-redirect/.git"
