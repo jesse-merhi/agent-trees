@@ -255,14 +255,32 @@ supports_styled_prompt() {
   [[ "${TERM:-}" != "dumb" ]] || return 1
 }
 
+terminal_columns() {
+  local columns="${COLUMNS:-}"
+
+  if [[ ! "$columns" =~ ^[0-9]+$ ]] || [[ "$columns" -lt 40 ]]; then
+    columns="$(tput cols 2>/dev/null || printf '80')"
+  fi
+
+  if [[ ! "$columns" =~ ^[0-9]+$ ]] || [[ "$columns" -lt 40 ]]; then
+    columns=80
+  fi
+
+  printf '%s\n' "$columns"
+}
+
 read_worktree_prompt() {
   if supports_styled_prompt; then
-    printf '\033[2mWorktree task\033[0m\n' >&2
-    printf '\033[48;5;236m\033[1m > \033[22mDescribe the task \033[2m(Enter = stay here)\033[22m ' >&2
+    local columns
+
+    columns="$(terminal_columns)"
+    printf '\n  \033[2mWorktree task\033[0m\n' >&2
+    printf '\033[48;5;236m%*s\r' "$columns" '' >&2
+    printf '  \033[1m>\033[22m  Describe the task \033[2m(Enter = stay here)\033[22m  ' >&2
     IFS= read -r prompt_text || prompt_text=""
     printf '\033[0m' >&2
   else
-    printf 'Worktree task\n> Describe the task (Enter = stay here): ' >&2
+    printf '\n  Worktree task\n  >  Describe the task (Enter = stay here): ' >&2
     IFS= read -r prompt_text || prompt_text=""
   fi
 }
