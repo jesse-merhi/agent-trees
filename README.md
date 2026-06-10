@@ -11,7 +11,8 @@ codex
 If you are in the primary checkout of a Git repo, the wrapper asks:
 
 ```text
-What are we working on? (Enter = use this checkout):
+Worktree task
+> Describe the task (Enter = stay here)
 ```
 
 Type the task:

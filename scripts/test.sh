@@ -76,6 +76,27 @@ assert_contains "$output" "jesse/fix-login-redirect"
 assert_contains "$output" "-C "
 test -e "$tmpdir/demo-fix-login-redirect/.git"
 
+interactive_repo="$tmpdir/interactive"
+make_repo "$interactive_repo"
+
+interactive_output="$(
+  cd "$interactive_repo"
+  CODEX_BIN=/bin/echo CODEX_WORKTREE_NAMER=local expect <<EOF
+log_user 1
+spawn "$repo_root/bin/codex-worktree"
+expect "Describe the task"
+send "Fix Login Redirect\r"
+expect eof
+EOF
+)"
+
+assert_contains "$interactive_output" "Worktree task"
+assert_contains "$interactive_output" "Describe the task"
+assert_contains "$interactive_output" "Enter = stay here"
+assert_contains "$interactive_output" "interactive-fix-login-redirect"
+assert_contains "$interactive_output" "jesse/fix-login-redirect"
+test -e "$tmpdir/interactive-fix-login-redirect/.git"
+
 assert_rejects_namer ollama
 assert_rejects_namer llama
 

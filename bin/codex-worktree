@@ -249,6 +249,24 @@ name_slug() {
   printf '%s\n' "$slug"
 }
 
+supports_styled_prompt() {
+  [[ -t 2 ]] || return 1
+  [[ -z "${NO_COLOR:-}" ]] || return 1
+  [[ "${TERM:-}" != "dumb" ]] || return 1
+}
+
+read_worktree_prompt() {
+  if supports_styled_prompt; then
+    printf '\033[2mWorktree task\033[0m\n' >&2
+    printf '\033[48;5;236m\033[1m > \033[22mDescribe the task \033[2m(Enter = stay here)\033[22m ' >&2
+    IFS= read -r prompt_text || prompt_text=""
+    printf '\033[0m' >&2
+  else
+    printf 'Worktree task\n> Describe the task (Enter = stay here): ' >&2
+    IFS= read -r prompt_text || prompt_text=""
+  fi
+}
+
 default_base_branch() {
   local origin_head
   local current_branch
@@ -313,8 +331,7 @@ parent_dir="$(dirname "$repo_root")"
 
 prompt_text="$(prompt_from_args "$@")"
 if [[ -z "$prompt_text" && -t 0 && -t 1 ]]; then
-  printf 'What are we working on? (Enter = use this checkout): ' >&2
-  IFS= read -r prompt_text
+  read_worktree_prompt
 
   if [[ -n "$prompt_text" ]]; then
     set -- "$@" "$prompt_text"
