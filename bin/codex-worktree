@@ -298,7 +298,7 @@ read_band_reply() {
   printf '\033[48;5;236m%*s\n' "$columns" '' >&2
   if [[ -n "$header" ]]; then
     printf '\033[48;5;236m%*s\r' "$columns" '' >&2
-    printf '\033[2m%s\033[22m\n' "$header" >&2
+    printf '  \033[2m%s\033[22m\n' "$header" >&2
   fi
   printf '\033[48;5;236m%*s\n' "$columns" '' >&2
   printf '\033[48;5;236m%*s\033[0m\r' "$columns" '' >&2
