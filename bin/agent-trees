@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: sidegrove <cli> [args...]
+Usage: agent-trees <cli> [args...]
 
 Runs an agent CLI in a task-specific Git worktree. Known CLIs get
 tailored argument handling: codex, claude. Any other CLI gets safe
@@ -11,8 +11,8 @@ generic handling.
 
 Normally invoked through the shell aliases added by scripts/install.sh:
 
-  alias codex='sidegrove codex'
-  alias claude='sidegrove claude'
+  alias codex='agent-trees codex'
+  alias claude='agent-trees claude'
 EOF
 }
 
@@ -42,10 +42,10 @@ resolve_cli_bin() {
   done < <(type -ap "$cli")
 }
 
-cli_bin="${SIDEGROVE_BIN:-$(resolve_cli_bin)}"
+cli_bin="${AGENT_TREES_BIN:-$(resolve_cli_bin)}"
 
 if [[ -z "$cli_bin" ]]; then
-  printf 'sidegrove: %s not found in PATH; set SIDEGROVE_BIN\n' "$cli" >&2
+  printf 'agent-trees: %s not found in PATH; set AGENT_TREES_BIN\n' "$cli" >&2
   exit 1
 fi
 
@@ -251,13 +251,13 @@ slug_from_prompt() {
 
 slug_from_agent() {
   local value="$1"
-  local model="${SIDEGROVE_NAMER_MODEL:-$(default_namer_model)}"
-  local timeout_seconds="${SIDEGROVE_NAMER_TIMEOUT:-8}"
+  local model="${AGENT_TREES_NAMER_MODEL:-$(default_namer_model)}"
+  local timeout_seconds="${AGENT_TREES_NAMER_TIMEOUT:-8}"
 
   command -v python3 >/dev/null 2>&1 || return 1
   [[ -x "$cli_bin" ]] || command -v "$cli_bin" >/dev/null 2>&1 || return 1
 
-  SIDEGROVE_NAMER_PROMPT="$value" python3 - "$cli" "$cli_bin" "$model" "$timeout_seconds" <<'PY'
+  AGENT_TREES_NAMER_PROMPT="$value" python3 - "$cli" "$cli_bin" "$model" "$timeout_seconds" <<'PY'
 from __future__ import annotations
 
 import os
@@ -276,7 +276,7 @@ try:
 except ValueError:
     timeout_seconds = 8
 
-task = os.environ.get("SIDEGROVE_NAMER_PROMPT", "")
+task = os.environ.get("AGENT_TREES_NAMER_PROMPT", "")
 if not task.strip():
     raise SystemExit(1)
 
@@ -367,7 +367,7 @@ PY
 
 name_slug() {
   local value="$1"
-  local namer="${SIDEGROVE_NAMER:-local}"
+  local namer="${AGENT_TREES_NAMER:-local}"
   local slug=""
 
   case "$namer" in
@@ -377,7 +377,7 @@ name_slug() {
     local)
       ;;
     *)
-      printf 'sidegrove: unknown SIDEGROVE_NAMER=%s\n' "$namer" >&2
+      printf 'agent-trees: unknown AGENT_TREES_NAMER=%s\n' "$namer" >&2
       return 1
       ;;
   esac
@@ -490,22 +490,22 @@ offer_worktree_cleanup() {
 
   case "$answer" in
     y|Y|yes|Yes|YES)
-      printf 'sidegrove: removing %s ...\n' "$(display_path "$worktree_dir")" >&2
+      printf 'agent-trees: removing %s ...\n' "$(display_path "$worktree_dir")" >&2
       if git -C "$repo_root" worktree remove "$worktree_dir"; then
-        printf 'sidegrove: removed %s\n' "$(display_path "$worktree_dir")" >&2
+        printf 'agent-trees: removed %s\n' "$(display_path "$worktree_dir")" >&2
         if branch_is_merged_into_base &&
           git -C "$repo_root" branch -D "$branch_name" >/dev/null 2>&1; then
-          printf 'sidegrove: deleted branch %s\n' "$branch_name" >&2
+          printf 'agent-trees: deleted branch %s\n' "$branch_name" >&2
         else
-          printf 'sidegrove: kept branch %s (has commits not on %s); delete with:\n\n  git -C %q branch -D %q\n' \
+          printf 'agent-trees: kept branch %s (has commits not on %s); delete with:\n\n  git -C %q branch -D %q\n' \
             "$branch_name" "$base_branch" "$repo_root" "$branch_name" >&2
         fi
       else
-        printf 'sidegrove: not removed; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
+        printf 'agent-trees: not removed; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
       fi
       ;;
     *)
-      printf 'sidegrove: keeping worktree; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
+      printf 'agent-trees: keeping worktree; clean up later with:\n\n  %s\n' "$(cleanup_command)" >&2
       ;;
   esac
 }
@@ -604,7 +604,7 @@ if [[ -z "$prompt_text" ]]; then
   exec "$cli_bin" "$@"
 fi
 
-slug="${SIDEGROVE_SLUG:-}"
+slug="${AGENT_TREES_SLUG:-}"
 if [[ -z "$slug" ]]; then
   slug="$(name_slug "$prompt_text")"
 else
@@ -615,27 +615,27 @@ if [[ -z "$slug" ]]; then
   exec "$cli_bin" "$@"
 fi
 
-base_branch="${SIDEGROVE_BASE:-}"
+base_branch="${AGENT_TREES_BASE:-}"
 if [[ -z "$base_branch" ]]; then
   base_branch="$(default_base_branch)"
 fi
 base_branch="${base_branch:-main}"
 
-branch_prefix="${SIDEGROVE_BRANCH_PREFIX:-}"
+branch_prefix="${AGENT_TREES_BRANCH_PREFIX:-}"
 if [[ -z "$branch_prefix" ]]; then
   branch_prefix="$(default_branch_prefix)"
 fi
 
-worktree_dir="${SIDEGROVE_DIR:-$parent_dir/$repo_name-$slug}"
-branch_name="${SIDEGROVE_BRANCH:-$branch_prefix/$slug}"
+worktree_dir="${AGENT_TREES_DIR:-$parent_dir/$repo_name-$slug}"
+branch_name="${AGENT_TREES_BRANCH:-$branch_prefix/$slug}"
 
 if [[ ! -e "$worktree_dir/.git" ]]; then
   if [[ -e "$worktree_dir" ]]; then
-    printf 'sidegrove: %s exists but is not a git worktree\n' "$worktree_dir" >&2
+    printf 'agent-trees: %s exists but is not a git worktree\n' "$worktree_dir" >&2
     exit 1
   fi
 
-  if [[ "${SIDEGROVE_FETCH:-0}" == "1" ]] &&
+  if [[ "${AGENT_TREES_FETCH:-0}" == "1" ]] &&
     git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
     git -C "$repo_root" fetch origin "$base_branch" --quiet || true
   fi
@@ -651,9 +651,9 @@ if [[ ! -e "$worktree_dir/.git" ]]; then
   fi
 fi
 
-printf 'sidegrove: %s on %s\n' "$(display_path "$worktree_dir")" "$branch_name" >&2
+printf 'agent-trees: %s on %s\n' "$(display_path "$worktree_dir")" "$branch_name" >&2
 
-if [[ "${SIDEGROVE_CLEANUP_PROMPT:-1}" != "1" || ! -t 0 || ! -t 1 ]]; then
+if [[ "${AGENT_TREES_CLEANUP_PROMPT:-1}" != "1" || ! -t 0 || ! -t 1 ]]; then
   cd "$worktree_dir"
   exec "$cli_bin" "$@"
 fi

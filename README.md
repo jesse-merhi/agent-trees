@@ -1,4 +1,4 @@
-# sidegrove
+# agent-trees
 
 A small Bash wrapper that gives every coding-agent task its own Git worktree and branch, without changing the commands you type. Works with Codex CLI, Claude Code, and any similar CLI.
 
@@ -18,31 +18,31 @@ From the primary checkout of a repo, the wrapper asks for the task first:
 It turns the task into a worktree and branch, then starts the real CLI inside it:
 
 ```text
-sidegrove: ~/repos/app-fix-broken-login-redirect on jesse/fix-broken-login-redirect
+agent-trees: ~/repos/app-fix-broken-login-redirect on jesse/fix-broken-login-redirect
 ```
 
 When the session ends, it offers to clean up after itself:
 
 ```text
 › Clean up worktree ~/repos/app-fix-broken-login-redirect? [y/N] y
-sidegrove: removing ~/repos/app-fix-broken-login-redirect ...
-sidegrove: removed ~/repos/app-fix-broken-login-redirect
-sidegrove: deleted branch jesse/fix-broken-login-redirect
+agent-trees: removing ~/repos/app-fix-broken-login-redirect ...
+agent-trees: removed ~/repos/app-fix-broken-login-redirect
+agent-trees: deleted branch jesse/fix-broken-login-redirect
 ```
 
 Each task gets an isolated checkout, so parallel agent sessions never trip over each other and your main checkout stays clean. Press Enter on a blank prompt to run in the current checkout instead.
 
 ## Why
 
-Running coding agents in Git worktrees is the standard way to isolate parallel work, but doing it by hand means naming a branch, creating the worktree, starting the agent there, and remembering to remove it later. sidegrove folds all of that into the command you already type, with the same flow for every CLI. [docs/prior-art.md](docs/prior-art.md) covers the background.
+Running coding agents in Git worktrees is the standard way to isolate parallel work, but doing it by hand means naming a branch, creating the worktree, starting the agent there, and remembering to remove it later. agent-trees folds all of that into the command you already type, with the same flow for every CLI. [docs/prior-art.md](docs/prior-art.md) covers the background.
 
 ## Supported CLIs
 
-The wrapper is one binary invoked as `sidegrove <cli>`:
+The wrapper is one binary invoked as `agent-trees <cli>`:
 
 ```sh
-sidegrove codex "Fix login redirect"
-sidegrove claude "Fix login redirect"
+agent-trees codex "Fix login redirect"
+agent-trees claude "Fix login redirect"
 ```
 
 `codex` and `claude` get tailored handling: their value-taking flags are understood when extracting the task from arguments, their management subcommands (`mcp`, `doctor`, `update`, ...) pass through, and their resume flows (`codex resume`, `claude -c` / `-r`) never create worktrees. For Claude Code, `-p` print mode and the built-in `-w` worktree flag also pass through untouched.
@@ -50,7 +50,7 @@ sidegrove claude "Fix login redirect"
 Any other CLI works with safe generic defaults:
 
 ```sh
-alias mycli='sidegrove mycli'
+alias mycli='agent-trees mycli'
 ```
 
 ## Requirements
@@ -58,14 +58,14 @@ alias mycli='sidegrove mycli'
 - macOS or Linux with Bash 3.2+
 - Git 2.5+ (the first version with `git worktree`)
 - The agent CLIs you use somewhere on your `PATH`
-- `python3`, only if you opt into agent naming with `SIDEGROVE_NAMER=agent`
+- `python3`, only if you opt into agent naming with `AGENT_TREES_NAMER=agent`
 - `expect`, only for running the test suite
 
 ## Install
 
 ```sh
-git clone https://github.com/jesse-merhi/sidegrove.git ~/repos/sidegrove
-cd ~/repos/sidegrove
+git clone https://github.com/jesse-merhi/agent-trees.git ~/repos/agent-trees
+cd ~/repos/agent-trees
 ./scripts/install.sh
 ```
 
@@ -78,22 +78,22 @@ source ~/.zshrc
 The installer copies:
 
 ```text
-bin/sidegrove -> ~/.local/bin/sidegrove
+bin/agent-trees -> ~/.local/bin/agent-trees
 ```
 
 and adds a managed alias block to `~/.zshrc`:
 
 ```sh
-alias codex='sidegrove codex'
-alias claude='sidegrove claude'
+alias codex='agent-trees codex'
+alias claude='agent-trees claude'
 ```
 
-Each alias is guarded by a `command -v` check, so nothing breaks if one of the CLIs is not installed. Aliases you wrote yourself are detected and left alone. Installing over an old `worktree-launcher` setup migrates it automatically.
+Each alias is guarded by a `command -v` check, so nothing breaks if one of the CLIs is not installed. Aliases you wrote yourself are detected and left alone. Installing over an old `worktree-launcher` or `sidegrove` setup migrates it automatically.
 
 ## Uninstall
 
 ```sh
-cd ~/repos/sidegrove
+cd ~/repos/agent-trees
 ./scripts/uninstall.sh
 ```
 
@@ -134,7 +134,7 @@ Can you please fix the broken login redirect when users sign in from Google?
 You can ask the agent itself to name the branch instead:
 
 ```sh
-SIDEGROVE_NAMER=agent claude "Fix login redirect"
+AGENT_TREES_NAMER=agent claude "Fix login redirect"
 ```
 
 For Codex this runs a tiny `codex exec` call; for Claude Code a `claude -p` call with a fast model. It is opt-in because spinning up a second agent just to name a worktree adds a few seconds. If it fails or times out, the local namer takes over.
@@ -156,7 +156,7 @@ Saying yes cannot lose work:
 - Git refuses to remove a worktree with uncommitted or untracked files.
 - A branch with its own commits is kept, and the exact `git branch -D` command to delete it deliberately is printed.
 
-The default is no. Saying no keeps the worktree and prints the removal command for later. The prompt never appears in non-interactive shells, and `SIDEGROVE_CLEANUP_PROMPT=0` disables it entirely.
+The default is no. Saying no keeps the worktree and prints the removal command for later. The prompt never appears in non-interactive shells, and `AGENT_TREES_CLEANUP_PROMPT=0` disables it entirely.
 
 There is no state file and no tracking: cleanup is a thin prompt over native `git worktree` commands.
 
@@ -166,24 +166,24 @@ Everything is an environment variable, so one-off overrides are just a prefix on
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `SIDEGROVE_BIN` | first `<cli>` on `PATH` | Binary to launch for the wrapped CLI |
-| `SIDEGROVE_NAMER` | `local` | `agent` asks the wrapped CLI to name the branch |
-| `SIDEGROVE_NAMER_MODEL` | per CLI | Model used for agent naming |
-| `SIDEGROVE_NAMER_TIMEOUT` | `8` | Seconds before agent naming falls back to local |
-| `SIDEGROVE_SLUG` | derived from the task | Slug used in worktree and branch names |
-| `SIDEGROVE_BRANCH_PREFIX` | first word of Git `user.name` | Branch prefix in `<prefix>/<slug>` |
-| `SIDEGROVE_BRANCH` | `<prefix>/<slug>` | Full branch name |
-| `SIDEGROVE_DIR` | `../<repo>-<slug>` | Worktree path |
-| `SIDEGROVE_BASE` | repo default branch | Base branch for new worktrees |
-| `SIDEGROVE_FETCH` | `0` | `1` fetches the base branch before creating the worktree |
-| `SIDEGROVE_CLEANUP_PROMPT` | `1` | `0` skips the exit-time cleanup prompt |
+| `AGENT_TREES_BIN` | first `<cli>` on `PATH` | Binary to launch for the wrapped CLI |
+| `AGENT_TREES_NAMER` | `local` | `agent` asks the wrapped CLI to name the branch |
+| `AGENT_TREES_NAMER_MODEL` | per CLI | Model used for agent naming |
+| `AGENT_TREES_NAMER_TIMEOUT` | `8` | Seconds before agent naming falls back to local |
+| `AGENT_TREES_SLUG` | derived from the task | Slug used in worktree and branch names |
+| `AGENT_TREES_BRANCH_PREFIX` | first word of Git `user.name` | Branch prefix in `<prefix>/<slug>` |
+| `AGENT_TREES_BRANCH` | `<prefix>/<slug>` | Full branch name |
+| `AGENT_TREES_DIR` | `../<repo>-<slug>` | Worktree path |
+| `AGENT_TREES_BASE` | repo default branch | Base branch for new worktrees |
+| `AGENT_TREES_FETCH` | `0` | `1` fetches the base branch before creating the worktree |
+| `AGENT_TREES_CLEANUP_PROMPT` | `1` | `0` skips the exit-time cleanup prompt |
 
 Examples:
 
 ```sh
-SIDEGROVE_SLUG=login-redirect claude "Fix login redirect"
-SIDEGROVE_BASE=develop codex "Fix login redirect"
-SIDEGROVE_BRANCH_PREFIX=alice claude "Fix login redirect"
+AGENT_TREES_SLUG=login-redirect claude "Fix login redirect"
+AGENT_TREES_BASE=develop codex "Fix login redirect"
+AGENT_TREES_BRANCH_PREFIX=alice claude "Fix login redirect"
 ```
 
 Fetch is off by default so the wrapper stays fast.

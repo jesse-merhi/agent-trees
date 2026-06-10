@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-bin_dir="${SIDEGROVE_BIN_DIR:-$HOME/.local/bin}"
-shell_rc="${SIDEGROVE_SHELL_RC:-$HOME/.zshrc}"
+bin_dir="${AGENT_TREES_BIN_DIR:-$HOME/.local/bin}"
+shell_rc="${AGENT_TREES_SHELL_RC:-$HOME/.zshrc}"
 
-for target in "$bin_dir/sidegrove" "$bin_dir/codex-worktree" "$bin_dir/codex-worktree-cleanup"; do
+for target in "$bin_dir/agent-trees" "$bin_dir/sidegrove" "$bin_dir/codex-worktree" "$bin_dir/codex-worktree-cleanup"; do
   if [[ -e "$target" ]]; then
     rm -f "$target"
     printf 'Removed %s\n' "$target"
@@ -29,8 +29,9 @@ strip_block() {
 
 strip_block worktree-launcher
 strip_block sidegrove
+strip_block agent-trees
 
 if [[ -e "$shell_rc" ]] &&
-  grep -Eq "^[[:space:]]*alias[[:space:]]+(codex|claude)=['\"]sidegrove" "$shell_rc"; then
-  printf 'Unmanaged sidegrove alias still exists in %s; remove it manually if desired.\n' "$shell_rc"
+  grep -Eq "^[[:space:]]*alias[[:space:]]+(codex|claude)=['\"]agent-trees" "$shell_rc"; then
+  printf 'Unmanaged agent-trees alias still exists in %s; remove it manually if desired.\n' "$shell_rc"
 fi

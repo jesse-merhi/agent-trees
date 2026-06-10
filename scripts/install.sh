@@ -2,14 +2,14 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-bin_dir="${SIDEGROVE_BIN_DIR:-$HOME/.local/bin}"
-shell_rc="${SIDEGROVE_SHELL_RC:-$HOME/.zshrc}"
-target="$bin_dir/sidegrove"
+bin_dir="${AGENT_TREES_BIN_DIR:-$HOME/.local/bin}"
+shell_rc="${AGENT_TREES_SHELL_RC:-$HOME/.zshrc}"
+target="$bin_dir/agent-trees"
 
 mkdir -p "$bin_dir"
-install -m 0755 "$repo_root/bin/sidegrove" "$target"
+install -m 0755 "$repo_root/bin/agent-trees" "$target"
 
-for obsolete in "$bin_dir/codex-worktree" "$bin_dir/codex-worktree-cleanup"; do
+for obsolete in "$bin_dir/codex-worktree" "$bin_dir/codex-worktree-cleanup" "$bin_dir/sidegrove"; do
   if [[ -e "$obsolete" ]]; then
     rm -f "$obsolete"
     printf 'Removed obsolete %s\n' "$obsolete"
@@ -43,13 +43,14 @@ strip_block() {
 
 strip_block worktree-launcher
 strip_block sidegrove
+strip_block agent-trees
 
-# A leftover alias pointing at the old codex-worktree binary is ours to
+# A leftover alias pointing at an old name of this tool is ours to
 # replace; the managed block below is appended later in the file, so it
 # wins over the stale line.
 has_foreign_alias() {
   grep -Eq "^[[:space:]]*alias[[:space:]]+$1=" "$shell_rc" &&
-    ! grep -Eq "^[[:space:]]*alias[[:space:]]+$1=['\"]codex-worktree['\"]" "$shell_rc"
+    ! grep -Eq "^[[:space:]]*alias[[:space:]]+$1=['\"](codex-worktree|sidegrove)" "$shell_rc"
 }
 
 aliases=()
@@ -63,14 +64,14 @@ done
 
 if [[ "${#aliases[@]}" -gt 0 ]]; then
   {
-    printf '\n# >>> sidegrove >>>\n'
-    printf 'if command -v sidegrove >/dev/null 2>&1; then\n'
+    printf '\n# >>> agent-trees >>>\n'
+    printf 'if command -v agent-trees >/dev/null 2>&1; then\n'
     for cli_name in "${aliases[@]}"; do
       printf "  if command -v %s >/dev/null 2>&1; then\n" "$cli_name"
-      printf "    alias %s='sidegrove %s'\n" "$cli_name" "$cli_name"
+      printf "    alias %s='agent-trees %s'\n" "$cli_name" "$cli_name"
       printf '  fi\n'
     done
-    printf 'fi\n# <<< sidegrove <<<\n'
+    printf 'fi\n# <<< agent-trees <<<\n'
   } >> "$shell_rc"
   printf 'Added shell alias block to %s\n' "$shell_rc"
 fi

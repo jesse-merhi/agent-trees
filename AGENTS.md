@@ -5,7 +5,7 @@ Orientation for AI agents and new contributors.
 ## What this is
 
 One Bash script that wraps agent CLIs (Codex, Claude Code, or anything
-else) as `sidegrove <cli>`. When you run a wrapped CLI with a task prompt
+else) as `agent-trees <cli>`. When you run a wrapped CLI with a task prompt
 from the primary checkout of a Git repo, it creates a task-specific Git
 worktree and branch, then runs the real binary inside the worktree. When
 the session ends it offers to remove the worktree. Everything else passes
@@ -15,7 +15,7 @@ through untouched via `exec`.
 
 | Path | Purpose |
 | --- | --- |
-| `bin/sidegrove` | The whole program. Plain Bash. |
+| `bin/agent-trees` | The whole program. Plain Bash. |
 | `scripts/install.sh` | Copies the script to `~/.local/bin` and adds a managed alias block to `~/.zshrc`. |
 | `scripts/uninstall.sh` | Removes the installed script and the managed alias block. |
 | `scripts/test.sh` | The full test suite. |
@@ -41,13 +41,13 @@ tests.
   allowed only in the opt-in agent naming path, and the script must still
   work without it.
 - Per-CLI knowledge lives in the `cli_*` functions near the top of
-  `bin/sidegrove`: value-taking options, passthrough subcommands,
+  `bin/agent-trees`: value-taking options, passthrough subcommands,
   passthrough flags, and the naming command. Adding a CLI means adding a
   case to those functions, plus tests. Verify flag semantics against the
   real CLI's `--help`, not from memory.
 - Every behavior change gets a matching case in `scripts/test.sh`.
 - User-facing configuration is environment variables prefixed
-  `SIDEGROVE_`. Document new ones in `README.md`.
+  `AGENT_TREES_`. Document new ones in `README.md`.
 - This is a launcher, not a session manager. Do not add state files,
   cleanup daemons, or worktree tracking. Cleanup is an exit-time prompt
   that runs native `git worktree remove` and nothing more (see

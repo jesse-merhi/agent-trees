@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-bash -n "$repo_root/bin/sidegrove"
+bash -n "$repo_root/bin/agent-trees"
 bash -n "$repo_root/scripts/install.sh"
 bash -n "$repo_root/scripts/uninstall.sh"
 
@@ -58,7 +58,7 @@ chmod +x "$fake_cli"
 # --- usage ---
 
 set +e
-usage_output="$("$repo_root/bin/sidegrove" 2>&1)"
+usage_output="$("$repo_root/bin/agent-trees" 2>&1)"
 usage_status=$?
 set -e
 
@@ -66,10 +66,10 @@ if [[ "$usage_status" -ne 2 ]]; then
   printf 'Expected exit 2 for missing CLI argument, got %s.\n' "$usage_status" >&2
   exit 1
 fi
-assert_contains "$usage_output" "Usage: sidegrove <cli>"
+assert_contains "$usage_output" "Usage: agent-trees <cli>"
 
-help_output="$("$repo_root/bin/sidegrove" --help 2>&1)"
-assert_contains "$help_output" "Usage: sidegrove <cli>"
+help_output="$("$repo_root/bin/agent-trees" --help 2>&1)"
+assert_contains "$help_output" "Usage: agent-trees <cli>"
 
 # --- basic worktree creation, ~ display, and launch directory ---
 
@@ -78,11 +78,11 @@ make_repo "$repo"
 
 output="$(
   cd "$repo"
-  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local HOME="$tmpdir" \
-    "$repo_root/bin/sidegrove" codex 'Fix Login Redirect' 2>&1
+  AGENT_TREES_BIN="$fake_cli" AGENT_TREES_NAMER=local HOME="$tmpdir" \
+    "$repo_root/bin/agent-trees" codex 'Fix Login Redirect' 2>&1
 )"
 
-assert_contains "$output" "sidegrove: ~/demo-fix-login-redirect on test/fix-login-redirect"
+assert_contains "$output" "agent-trees: ~/demo-fix-login-redirect on test/fix-login-redirect"
 assert_contains "$output" "PWD:$tmpdir/demo-fix-login-redirect"
 assert_contains "$output" "ARGS:Fix Login Redirect"
 test -e "$tmpdir/demo-fix-login-redirect/.git"
@@ -95,8 +95,8 @@ make_repo "$codex_profile_repo"
 
 codex_profile_output="$(
   cd "$codex_profile_repo"
-  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local \
-    "$repo_root/bin/sidegrove" codex -p myprofile 'Fix Login Redirect' 2>&1
+  AGENT_TREES_BIN="$fake_cli" AGENT_TREES_NAMER=local \
+    "$repo_root/bin/agent-trees" codex -p myprofile 'Fix Login Redirect' 2>&1
 )"
 
 assert_contains "$codex_profile_output" "test/fix-login-redirect"
@@ -108,8 +108,8 @@ make_repo "$claude_model_repo"
 
 claude_model_output="$(
   cd "$claude_model_repo"
-  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local \
-    "$repo_root/bin/sidegrove" claude --model fable 'Fix Login Redirect' 2>&1
+  AGENT_TREES_BIN="$fake_cli" AGENT_TREES_NAMER=local \
+    "$repo_root/bin/agent-trees" claude --model fable 'Fix Login Redirect' 2>&1
 )"
 
 assert_contains "$claude_model_output" "test/fix-login-redirect"
@@ -121,8 +121,8 @@ make_repo "$claude_print_repo"
 
 claude_print_output="$(
   cd "$claude_print_repo"
-  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local \
-    "$repo_root/bin/sidegrove" claude -p 'What does this repo do?' 2>&1
+  AGENT_TREES_BIN="$fake_cli" AGENT_TREES_NAMER=local \
+    "$repo_root/bin/agent-trees" claude -p 'What does this repo do?' 2>&1
 )"
 
 assert_contains "$claude_print_output" "ARGS:-p What does this repo do?"
@@ -135,19 +135,19 @@ fi
 # Resume flows and management subcommands pass through.
 claude_resume_output="$(
   cd "$claude_print_repo"
-  SIDEGROVE_BIN="$fake_cli" "$repo_root/bin/sidegrove" claude -c 2>&1
+  AGENT_TREES_BIN="$fake_cli" "$repo_root/bin/agent-trees" claude -c 2>&1
 )"
 assert_contains "$claude_resume_output" "ARGS:-c"
 
 claude_mcp_output="$(
   cd "$claude_print_repo"
-  SIDEGROVE_BIN="$fake_cli" "$repo_root/bin/sidegrove" claude mcp list 2>&1
+  AGENT_TREES_BIN="$fake_cli" "$repo_root/bin/agent-trees" claude mcp list 2>&1
 )"
 assert_contains "$claude_mcp_output" "ARGS:mcp list"
 
 codex_cleanup_passthrough="$(
   cd "$repo"
-  SIDEGROVE_BIN=/bin/echo "$repo_root/bin/sidegrove" codex cleanup --yes 2>&1
+  AGENT_TREES_BIN=/bin/echo "$repo_root/bin/agent-trees" codex cleanup --yes 2>&1
 )"
 
 if [[ "$codex_cleanup_passthrough" != "cleanup --yes" ]]; then
@@ -162,8 +162,8 @@ make_repo "$generic_repo"
 
 generic_output="$(
   cd "$generic_repo"
-  SIDEGROVE_BIN="$fake_cli" SIDEGROVE_NAMER=local \
-    "$repo_root/bin/sidegrove" somecli 'Fix Login Redirect' 2>&1
+  AGENT_TREES_BIN="$fake_cli" AGENT_TREES_NAMER=local \
+    "$repo_root/bin/agent-trees" somecli 'Fix Login Redirect' 2>&1
 )"
 
 assert_contains "$generic_output" "test/fix-login-redirect"
@@ -176,9 +176,9 @@ make_repo "$interactive_repo"
 
 interactive_output="$(
   cd "$interactive_repo"
-  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local expect <<EOF
+  AGENT_TREES_BIN=/bin/echo AGENT_TREES_NAMER=local expect <<EOF
 log_user 1
-spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/sidegrove" codex
+spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/agent-trees" codex
 expect "Describe the task"
 expect "› "
 send "Fix Login Redirect\r"
@@ -204,9 +204,9 @@ make_repo "$cleanup_yes_repo"
 
 cleanup_yes_output="$(
   cd "$cleanup_yes_repo"
-  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local expect <<EOF
+  AGENT_TREES_BIN=/bin/echo AGENT_TREES_NAMER=local expect <<EOF
 log_user 1
-spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/sidegrove" codex "Fix Login Redirect"
+spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/agent-trees" codex "Fix Login Redirect"
 expect "Clean up worktree"
 send "y\r"
 expect eof
@@ -235,9 +235,9 @@ chmod +x "$commit_cli"
 
 keep_branch_output="$(
   cd "$keep_branch_repo"
-  SIDEGROVE_BIN="$commit_cli" SIDEGROVE_NAMER=local expect <<EOF
+  AGENT_TREES_BIN="$commit_cli" AGENT_TREES_NAMER=local expect <<EOF
 log_user 1
-spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/sidegrove" codex "Fix Login Redirect"
+spawn env TERM=xterm-256color COLUMNS=72 "$repo_root/bin/agent-trees" codex "Fix Login Redirect"
 expect "Clean up worktree"
 send "y\r"
 expect eof
@@ -257,9 +257,9 @@ make_repo "$cleanup_off_repo"
 
 cleanup_off_output="$(
   cd "$cleanup_off_repo"
-  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local expect <<EOF
+  AGENT_TREES_BIN=/bin/echo AGENT_TREES_NAMER=local expect <<EOF
 log_user 1
-spawn env TERM=xterm-256color COLUMNS=72 SIDEGROVE_CLEANUP_PROMPT=0 "$repo_root/bin/sidegrove" codex "Fix Login Redirect"
+spawn env TERM=xterm-256color COLUMNS=72 AGENT_TREES_CLEANUP_PROMPT=0 "$repo_root/bin/agent-trees" codex "Fix Login Redirect"
 expect eof
 EOF
 )"
@@ -280,19 +280,19 @@ assert_rejects_namer() {
   set +e
   output="$(
     cd "$repo"
-    SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER="$namer" \
-      "$repo_root/bin/sidegrove" codex 'Fix Login Redirect' 2>&1
+    AGENT_TREES_BIN=/bin/echo AGENT_TREES_NAMER="$namer" \
+      "$repo_root/bin/agent-trees" codex 'Fix Login Redirect' 2>&1
   )"
   status=$?
   set -e
 
   if [[ "$status" -eq 0 ]]; then
-    printf 'Expected SIDEGROVE_NAMER=%s to fail.\n' "$namer" >&2
+    printf 'Expected AGENT_TREES_NAMER=%s to fail.\n' "$namer" >&2
     printf 'Actual output:\n%s\n' "$output" >&2
     exit 1
   fi
 
-  assert_contains "$output" "unknown SIDEGROVE_NAMER=$namer"
+  assert_contains "$output" "unknown AGENT_TREES_NAMER=$namer"
 
   if find "$tmpdir" -maxdepth 1 -type d -name "reject-$namer-*" | grep -q .; then
     printf 'Rejected namer %s created a worktree unexpectedly.\n' "$namer" >&2
@@ -331,8 +331,8 @@ chmod +x "$fake_codex_namer"
 
 codex_namer_output="$(
   cd "$codex_namer_repo"
-  SIDEGROVE_BIN="$fake_codex_namer" SIDEGROVE_NAMER=agent \
-    "$repo_root/bin/sidegrove" codex 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
+  AGENT_TREES_BIN="$fake_codex_namer" AGENT_TREES_NAMER=agent \
+    "$repo_root/bin/agent-trees" codex 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
 )"
 
 assert_contains "$codex_namer_output" "codexnamer-repair-google-signin-redirect"
@@ -359,8 +359,8 @@ chmod +x "$fake_claude_namer"
 
 claude_namer_output="$(
   cd "$claude_namer_repo"
-  SIDEGROVE_BIN="$fake_claude_namer" SIDEGROVE_NAMER=agent \
-    "$repo_root/bin/sidegrove" claude 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
+  AGENT_TREES_BIN="$fake_claude_namer" AGENT_TREES_NAMER=agent \
+    "$repo_root/bin/agent-trees" claude 'Can you please fix the broken login redirect when users sign in from Google?' 2>&1
 )"
 
 assert_contains "$claude_namer_output" "claudenamer-repair-google-signin-redirect"
@@ -374,8 +374,8 @@ make_repo "$override_repo"
 
 override_output="$(
   cd "$override_repo"
-  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local SIDEGROVE_SLUG='Raw Custom Name' \
-    "$repo_root/bin/sidegrove" codex 'please use an override' 2>&1
+  AGENT_TREES_BIN=/bin/echo AGENT_TREES_NAMER=local AGENT_TREES_SLUG='Raw Custom Name' \
+    "$repo_root/bin/agent-trees" codex 'please use an override' 2>&1
 )"
 
 assert_contains "$override_output" "override-raw-custom-name"
@@ -386,8 +386,8 @@ make_repo "$prefix_repo"
 
 prefix_output="$(
   cd "$prefix_repo"
-  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local SIDEGROVE_BRANCH_PREFIX=alice \
-    "$repo_root/bin/sidegrove" codex 'Fix Login Redirect' 2>&1
+  AGENT_TREES_BIN=/bin/echo AGENT_TREES_NAMER=local AGENT_TREES_BRANCH_PREFIX=alice \
+    "$repo_root/bin/agent-trees" codex 'Fix Login Redirect' 2>&1
 )"
 
 assert_contains "$prefix_output" "prefix-fix-login-redirect"
@@ -400,7 +400,7 @@ make_repo "$blank_repo"
 
 blank_output="$(
   cd "$blank_repo"
-  SIDEGROVE_BIN=/bin/echo SIDEGROVE_NAMER=local "$repo_root/bin/sidegrove" codex 2>&1
+  AGENT_TREES_BIN=/bin/echo AGENT_TREES_NAMER=local "$repo_root/bin/agent-trees" codex 2>&1
 )"
 
 if find "$tmpdir" -maxdepth 1 -type d -name 'blank-*' | grep -q .; then
@@ -420,6 +420,8 @@ install_home="$tmpdir/home"
 mkdir -p "$install_home/.local/bin"
 printf '#!/bin/sh\n' > "$install_home/.local/bin/codex-worktree"
 chmod +x "$install_home/.local/bin/codex-worktree"
+printf '#!/bin/sh\n' > "$install_home/.local/bin/sidegrove"
+chmod +x "$install_home/.local/bin/sidegrove"
 mkdir -p "$install_home/.local/state/worktree-launcher"
 printf 'old-cache\n' > "$install_home/.local/state/worktree-launcher/worktrees.tsv"
 cat > "$install_home/.zshrc" <<'EOF'
@@ -428,6 +430,11 @@ if command -v codex-worktree >/dev/null 2>&1; then
   alias codex='codex-worktree'
 fi
 # <<< worktree-launcher <<<
+# >>> sidegrove >>>
+if command -v sidegrove >/dev/null 2>&1; then
+  alias codex='sidegrove codex'
+fi
+# <<< sidegrove <<<
 if command -v codex-worktree >/dev/null 2>&1; then
   alias codex='codex-worktree'
 fi
@@ -436,28 +443,30 @@ EOF
 
 install_output="$(HOME="$install_home" "$repo_root/scripts/install.sh")"
 
-test -x "$install_home/.local/bin/sidegrove"
+test -x "$install_home/.local/bin/agent-trees"
 test ! -e "$install_home/.local/bin/codex-worktree"
+test ! -e "$install_home/.local/bin/sidegrove"
 test ! -e "$install_home/.local/state/worktree-launcher/worktrees.tsv"
 assert_contains "$install_output" "Existing claude alias found"
 zshrc_content="$(cat "$install_home/.zshrc")"
 assert_not_contains "$zshrc_content" "worktree-launcher"
-assert_contains "$zshrc_content" "# >>> sidegrove >>>"
-assert_contains "$zshrc_content" "alias codex='sidegrove codex'"
-assert_not_contains "$zshrc_content" "alias claude='sidegrove claude'"
+assert_not_contains "$zshrc_content" "sidegrove"
+assert_contains "$zshrc_content" "# >>> agent-trees >>>"
+assert_contains "$zshrc_content" "alias codex='agent-trees codex'"
+assert_not_contains "$zshrc_content" "alias claude='agent-trees claude'"
 assert_contains "$zshrc_content" "alias claude='my-custom-claude'"
 
 HOME="$install_home" "$repo_root/scripts/uninstall.sh" >/dev/null
-test ! -e "$install_home/.local/bin/sidegrove"
+test ! -e "$install_home/.local/bin/agent-trees"
 zshrc_content="$(cat "$install_home/.zshrc")"
-assert_not_contains "$zshrc_content" "# >>> sidegrove >>>"
+assert_not_contains "$zshrc_content" "# >>> agent-trees >>>"
 assert_contains "$zshrc_content" "alias claude='my-custom-claude'"
 
 fresh_home="$tmpdir/freshhome"
 mkdir -p "$fresh_home"
 HOME="$fresh_home" "$repo_root/scripts/install.sh" >/dev/null
 fresh_zshrc="$(cat "$fresh_home/.zshrc")"
-assert_contains "$fresh_zshrc" "alias codex='sidegrove codex'"
-assert_contains "$fresh_zshrc" "alias claude='sidegrove claude'"
+assert_contains "$fresh_zshrc" "alias codex='agent-trees codex'"
+assert_contains "$fresh_zshrc" "alias claude='agent-trees claude'"
 
 printf 'All tests passed.\n'
