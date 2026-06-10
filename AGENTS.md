@@ -48,8 +48,8 @@ tests.
 - Every behavior change gets a matching case in `scripts/test.sh`.
 - User-facing configuration is environment variables prefixed
   `AGENT_TREES_`. Document new ones in `README.md`.
-- This is a launcher, not a session manager. Do not add state files,
-  cleanup daemons, or worktree tracking. Cleanup is an exit-time prompt
+- Keep this a launcher: no state files, no cleanup daemons, no session
+  management, no worktree tracking. Cleanup is an exit-time prompt
   that runs native `git worktree remove` and nothing more (see
   `docs/prior-art.md`).
 - The interactive prompts deliberately mimic the Codex TUI: a grey

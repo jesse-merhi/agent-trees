@@ -49,7 +49,7 @@ Requirements: macOS or Linux with Bash 3.2+, Git 2.5+, your agent CLIs on `PATH`
 
 ## When it stays out of the way
 
-`codex` and `claude` get tailored argument handling. Anything that is not a fresh task session goes straight to the real binary:
+`codex` and `claude` get tailored argument handling. The wrapper steps in only for fresh task sessions; all of these go straight to the real binary:
 
 - management subcommands (`mcp`, `doctor`, `update`, `login`, ...)
 - resume flows (`codex resume`, `claude -c` / `-r`)
@@ -73,7 +73,7 @@ Can you please fix the broken login redirect when users sign in from Google?
 -> fix-broken-login-redirect
 ```
 
-New worktrees branch from the repo's default branch. A branch that already exists, locally or on the remote, is checked out instead of recreated.
+New worktrees branch from the repo's default branch. A branch that already exists, locally or on the remote, is checked out and reused.
 
 You can ask the agent itself to name the branch (a tiny `codex exec` or fast-model `claude -p` call). It adds a few seconds and falls back to local naming on failure:
 
@@ -88,7 +88,7 @@ Answering `y` to the exit prompt removes the worktree with `git worktree remove`
 - Git refuses to remove a worktree with uncommitted or untracked files.
 - A branch with its own commits is kept, and the exact `git branch -D` command to delete it deliberately is printed.
 
-The default is no, which keeps the worktree and prints the removal command for later. The prompt only appears in interactive shells. There is no state file and no tracking: cleanup is a thin prompt over native `git worktree` commands.
+The default is no, which keeps the worktree and prints the removal command for later. The prompt only appears in interactive shells. Cleanup runs plain `git worktree` commands and keeps zero state.
 
 ## Configuration
 
@@ -116,4 +116,4 @@ AGENT_TREES_BASE=develop codex "Fix login redirect"
 
 `./scripts/test.sh` syntax-checks every script, then drives worktree creation, per-CLI argument handling, the interactive prompts, and cleanup end to end in temp repos with temp home directories. No real agent session starts and your `~/.zshrc` is never touched. [AGENTS.md](AGENTS.md) covers repo layout and conventions.
 
-This is intentionally small: a launcher, not a session manager. It cannot change the directory of a running TUI session, so it creates the worktree first and starts the real CLI inside it.
+The whole tool is one Bash script: it creates a worktree, starts the real CLI inside it, and asks one cleanup question on exit. It cannot change the directory of a running TUI session, which is why the worktree is created first.
